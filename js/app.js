@@ -70,12 +70,22 @@ function showView(id) {
   const form = document.getElementById("pl-form-login");
   const mensagemErro = document.getElementById("pl-mensagem-erro");
 
-  form.addEventListener("submit", (e) => {
+  // o login agora é conferido no SERVIDOR (POST /login/professor), então
+  // o envio do formulário precisa esperar a resposta (async / await)
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const matricula = document.getElementById("pl-matricula").value.trim();
     const pin = document.getElementById("pl-pin").value.trim();
 
-    const professor = Dados.autenticarProfessor(matricula, pin);
+    let professor;
+    try {
+      professor = await Dados.autenticarProfessor(matricula, pin);
+    } catch (erro) {
+      // servidor fora do ar / endereço errado (não é senha errada)
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
 
     if (!professor) {
       mensagemErro.textContent = "Matrícula ou PIN inválidos";
@@ -101,9 +111,10 @@ function showView(id) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    // O acesso do aluno é feito pelo RA + senha fixa: o RA precisa
-    // existir no alunos.json (o sistema identifica sozinho o nome, a
-    // sala e o turno) e a senha precisa ser exatamente "@Coronel2026".
+    // O acesso do aluno é conferido no SERVIDOR (POST /login/aluno): o
+    // RA precisa existir na lista de alunos do servidor (que devolve
+    // sozinho o nome, a sala e o turno) e a senha precisa ser
+    // exatamente "@Coronel2026".
     // RA inexistente ou senha errada = login bloqueado.
     const ra = document.getElementById("al-ra").value.trim();
     const senha = document.getElementById("al-senha").value;
@@ -114,12 +125,20 @@ function showView(id) {
       return;
     }
 
-    const aluno = await Dados.autenticarAluno(ra, senha);
+    let aluno;
+    try {
+      aluno = await Dados.autenticarAluno(ra, senha);
+    } catch (erro) {
+      // servidor fora do ar / endereço errado (não é RA/senha errados)
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
 
     if (!aluno) {
       mensagemErro.textContent = Dados.alunosCarregados()
         ? "RA não encontrado ou senha incorreta."
-        : "Não foi possível carregar a lista de alunos (alunos.json).";
+        : "Não foi possível carregar a lista de alunos (GET /alunos).";
       mensagemErro.style.display = "block";
       return;
     }
@@ -139,12 +158,22 @@ function showView(id) {
   const form = document.getElementById("sl-form-login");
   const mensagemErro = document.getElementById("sl-mensagem-erro");
 
-  form.addEventListener("submit", (e) => {
+  // o login agora é conferido no SERVIDOR (POST /login/secretaria), então
+  // o envio do formulário precisa esperar a resposta (async / await)
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const usuario = document.getElementById("sl-usuario").value.trim();
     const senha = document.getElementById("sl-senha").value.trim();
 
-    const conta = Dados.autenticarSecretaria(usuario, senha);
+    let conta;
+    try {
+      conta = await Dados.autenticarSecretaria(usuario, senha);
+    } catch (erro) {
+      // servidor fora do ar / endereço errado (não é usuário/senha errados)
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
 
     if (!conta) {
       mensagemErro.textContent = "Usuário ou senha inválidos";
@@ -170,6 +199,9 @@ function prepararNovaOcorrencia() {
   // recomeça o seletor em 3 etapas (turno -> sala -> aluno) do zero
   // toda vez que a tela é aberta
   if (window.prepararSeletorAlunos) window.prepararSeletorAlunos();
+  // relê a lista de alunos no servidor (GET /alunos): quando ela chegar,
+  // o evento "alunos:carregados" (lá embaixo) remonta o seletor
+  Dados.carregarAlunos();
 }
 
 (function () {
@@ -320,8 +352,8 @@ function prepararNovaOcorrencia() {
   // do zero sempre que a tela de nova ocorrência for aberta
   window.prepararSeletorAlunos = prepararSeletorAlunos;
 
-  // quando o alunos.json terminar de ser lido, se o professor ainda não
-  // escolheu nada, o seletor é montado com a lista do arquivo
+  // quando a lista de alunos chegar do servidor (GET /alunos), se o
+  // professor ainda não escolheu nada, o seletor é montado com ela
   window.addEventListener("alunos:carregados", () => {
     if (!seletorTurno.value) prepararSeletorAlunos();
   });
@@ -330,7 +362,7 @@ function prepararNovaOcorrencia() {
   const mensagemErro = document.getElementById("oc-mensagem-erro");
   const mensagemSucesso = document.getElementById("oc-mensagem-sucesso");
 
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     mensagemErro.style.display = "none";
 
@@ -345,16 +377,24 @@ function prepararNovaOcorrencia() {
       return;
     }
 
-    Dados.criarOcorrencia({
-      professorId: sessao.id,
-      professorNome: sessao.nome,
-      alunoNome: aluno.nome,
-      alunoRa: aluno.ra,
-      turma: aluno.sala || aluno.turma || "",
-      tipo: tipoSelecionado,
-      gravidade: gravidadeSelecionada,
-      detalhes,
-    });
+    // a ocorrência agora é gravada no SERVIDOR (POST /ocorrencias):
+    // o formulário só é limpo depois que o servidor confirmar
+    try {
+      await Dados.criarOcorrencia({
+        professorId: sessao.id,
+        professorNome: sessao.nome,
+        alunoNome: aluno.nome,
+        alunoRa: aluno.ra,
+        turma: aluno.sala || aluno.turma || "",
+        tipo: tipoSelecionado,
+        gravidade: gravidadeSelecionada,
+        detalhes,
+      });
+    } catch (erro) {
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
 
     form.reset();
     prepararSeletorAlunos();
@@ -396,13 +436,13 @@ function prepararEntradaAtrasada() {
   const mensagemErro = document.getElementById("atr-mensagem-erro");
   const mensagemSucesso = document.getElementById("atr-mensagem-sucesso");
 
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     mensagemErro.style.display = "none";
 
     const sessao = Sessao.obter();
-    // a sala/turma NUNCA vem do que o aluno digitou: vem do alunos.json,
-    // identificada pelo RA na hora do login
+    // a sala/turma NUNCA vem do que o aluno digitou: vem da lista de
+    // alunos do servidor, identificada pelo RA na hora do login
     const turma = sessao.sala || sessao.turma || "";
     const motivo = document.getElementById("atr-motivo").value.trim();
 
@@ -412,13 +452,21 @@ function prepararEntradaAtrasada() {
       return;
     }
 
-    Dados.criarEntradaAtrasada({
-      alunoId: sessao.id,
-      alunoNome: sessao.nome,
-      alunoRa: sessao.ra,
-      turma,
-      motivo,
-    });
+    // o atraso agora é gravado no SERVIDOR (POST /atrasos): o formulário
+    // só é limpo depois que o servidor confirmar
+    try {
+      await Dados.criarEntradaAtrasada({
+        alunoId: sessao.id,
+        alunoNome: sessao.nome,
+        alunoRa: sessao.ra,
+        turma,
+        motivo,
+      });
+    } catch (erro) {
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
 
     form.reset();
     document.getElementById("atr-aluno-nome").value = sessao.nome;
@@ -496,6 +544,28 @@ function prepararEntradaAtrasada() {
 
   let filtroAtual = "abertas"; // "abertas" | "todas"
 
+  /* ---------------------------------------------------------------
+     DADOS DO PAINEL
+     ---------------------------------------------------------------
+     Agora as listas vêm do SERVIDOR (GET /ocorrencias e GET /atrasos)
+     e ficam guardadas nestas duas variáveis. Toda vez que o painel
+     precisa se desenhar, primeiro ele atualiza as duas com
+     carregarDados() e só depois desenha (é o que renderizar() faz).
+     Assim cards, gráficos e tabelas usam sempre a mesma "foto" dos
+     dados, sem disparar uma consulta por gráfico/tabela.
+     --------------------------------------------------------------- */
+  let ocorrenciasDoPainel = [];
+  let atrasosDoPainel = [];
+
+  async function carregarDados() {
+    const [ocorrencias, atrasos] = await Promise.all([
+      Dados.listarOcorrencias(),
+      Dados.listarEntradasAtrasadas(),
+    ]);
+    ocorrenciasDoPainel = ocorrencias;
+    atrasosDoPainel = atrasos;
+  }
+
   let idsConhecidosOcorrencias = new Set();
   let idsConhecidosAtrasos = new Set();
   let primeiraRenderizacaoOcorrencias = true;
@@ -522,8 +592,8 @@ function prepararEntradaAtrasada() {
      --------------------------------------------------------------- */
   function renderizarCards() {
     const hoje = new Date();
-    const ocorrencias = Dados.listarOcorrencias();
-    const atrasos = Dados.listarEntradasAtrasadas();
+    const ocorrencias = ocorrenciasDoPainel;
+    const atrasos = atrasosDoPainel;
 
     const ocorrenciasHoje = ocorrencias.filter((o) => ehMesmoDia(o.criadaEm, hoje)).length;
     const atrasosHoje = atrasos.filter((a) => ehMesmoDia(a.criadaEm, hoje)).length;
@@ -553,7 +623,7 @@ function prepararEntradaAtrasada() {
      --------------------------------------------------------------- */
   function renderizarGraficoTipos() {
     const container = document.getElementById("pn-grafico-tipos");
-    const ocorrencias = Dados.listarOcorrencias();
+    const ocorrencias = ocorrenciasDoPainel;
 
     const dias = [];
     for (let i = 6; i >= 0; i--) {
@@ -584,7 +654,7 @@ function prepararEntradaAtrasada() {
      --------------------------------------------------------------- */
   function renderizarGraficoAtrasos() {
     const container = document.getElementById("pn-grafico-atrasos");
-    const atrasos = Dados.listarEntradasAtrasadas();
+    const atrasos = atrasosDoPainel;
 
     const dias = [];
     for (let i = 6; i >= 0; i--) {
@@ -615,7 +685,7 @@ function prepararEntradaAtrasada() {
      --------------------------------------------------------------- */
   function renderizarTabelaOcorrencias() {
     const container = document.getElementById("pn-tabela-ocorrencias");
-    const ocorrencias = Dados.listarOcorrencias().slice(0, 5);
+    const ocorrencias = ocorrenciasDoPainel.slice(0, 5);
 
     if (ocorrencias.length === 0) {
       container.innerHTML = `<div class="tabela-vazio">Nenhuma ocorrência registrada ainda.</div>`;
@@ -651,7 +721,7 @@ function prepararEntradaAtrasada() {
      --------------------------------------------------------------- */
   function renderizarTabelaAtrasos() {
     const container = document.getElementById("pn-tabela-atrasos");
-    const atrasos = Dados.listarEntradasAtrasadas().slice(0, 5);
+    const atrasos = atrasosDoPainel.slice(0, 5);
 
     if (atrasos.length === 0) {
       container.innerHTML = `<div class="tabela-vazio">Nenhuma entrada atrasada registrada ainda.</div>`;
@@ -692,12 +762,15 @@ function prepararEntradaAtrasada() {
      LISTA DE OCORRÊNCIAS (seção completa)
      --------------------------------------------------------------- */
   function renderizarOcorrencias() {
-    const lista = Dados.listarOcorrencias({ apenasAbertas: filtroAtual === "abertas" });
+    // a "foto" dos dados já foi atualizada por carregarDados()
+    const todas = ocorrenciasDoPainel;
+    const lista = filtroAtual === "abertas"
+      ? todas.filter((o) => o.status !== "RESOLVIDA")
+      : todas;
     const container = document.getElementById("pn-lista-ocorrencias");
 
-    // detecta ocorrencias novas (chegadas via outra aba) para notificar
+    // detecta ocorrencias novas (lançadas em outro aparelho) para notificar
     if (!primeiraRenderizacaoOcorrencias) {
-      const todas = Dados.listarOcorrencias();
       todas.forEach((o) => {
         if (!idsConhecidosOcorrencias.has(o.id)) {
           idsConhecidosOcorrencias.add(o.id);
@@ -706,7 +779,7 @@ function prepararEntradaAtrasada() {
         }
       });
     } else {
-      Dados.listarOcorrencias().forEach((o) => idsConhecidosOcorrencias.add(o.id));
+      todas.forEach((o) => idsConhecidosOcorrencias.add(o.id));
       primeiraRenderizacaoOcorrencias = false;
     }
 
@@ -751,12 +824,15 @@ function prepararEntradaAtrasada() {
      LISTA DE ENTRADAS ATRASADAS (seção completa)
      --------------------------------------------------------------- */
   function renderizarAtrasos() {
-    const lista = Dados.listarEntradasAtrasadas({ apenasAbertas: filtroAtual === "abertas" });
+    // a "foto" dos dados já foi atualizada por carregarDados()
+    const todas = atrasosDoPainel;
+    const lista = filtroAtual === "abertas"
+      ? todas.filter((ent) => ent.status !== "RESOLVIDA")
+      : todas;
     const container = document.getElementById("pn-lista-atrasos");
 
-    // detecta entradas atrasadas novas (chegadas via outra aba) para notificar
+    // detecta entradas atrasadas novas (lançadas em outro aparelho) para notificar
     if (!primeiraRenderizacaoAtrasos) {
-      const todas = Dados.listarEntradasAtrasadas();
       todas.forEach((ent) => {
         if (!idsConhecidosAtrasos.has(ent.id)) {
           idsConhecidosAtrasos.add(ent.id);
@@ -765,7 +841,7 @@ function prepararEntradaAtrasada() {
         }
       });
     } else {
-      Dados.listarEntradasAtrasadas().forEach((ent) => idsConhecidosAtrasos.add(ent.id));
+      todas.forEach((ent) => idsConhecidosAtrasos.add(ent.id));
       primeiraRenderizacaoAtrasos = false;
     }
 
@@ -805,19 +881,38 @@ function prepararEntradaAtrasada() {
     `).join("");
   }
 
-  function renderizar() {
+  // atualiza as listas no servidor e redesenha o painel inteiro.
+  // Agora é async porque GET /ocorrencias e GET /atrasos são chamadas
+  // de rede: quem chama sem await (nos listeners de evento) só perde
+  // a espera, o desenho continua acontecendo normalmente.
+  async function renderizar() {
+    try {
+      await carregarDados();
+    } catch (erro) {
+      console.error("Não foi possível carregar os dados do painel.", erro);
+    }
     renderizarOcorrencias();
     renderizarAtrasos();
     renderizarDashboard();
   }
 
-  window.mudarStatusOcorrencia = function (id, status) {
-    Dados.atualizarStatus(id, status);
+  // os botões "marcar como vista/resolvida" agora gravam no SERVIDOR
+  // (PATCH /ocorrencias/:id e PATCH /atrasos/:id) antes de redesenhar
+  window.mudarStatusOcorrencia = async function (id, status) {
+    try {
+      await Dados.atualizarStatus(id, status);
+    } catch (erro) {
+      console.error("Não foi possível mudar o status da ocorrência.", erro);
+    }
     renderizar();
   };
 
-  window.mudarStatusAtraso = function (id, status) {
-    Dados.atualizarStatusEntradaAtrasada(id, status);
+  window.mudarStatusAtraso = async function (id, status) {
+    try {
+      await Dados.atualizarStatusEntradaAtrasada(id, status);
+    } catch (erro) {
+      console.error("Não foi possível mudar o status da entrada atrasada.", erro);
+    }
     renderizar();
   };
 
@@ -836,13 +931,16 @@ function prepararEntradaAtrasada() {
     botao.textContent = ok ? "🔔 Notificações ativas" : "Permissão negada";
   });
 
-  Dados.aoMudar(renderizarOcorrencias);
-  Dados.aoMudarEntradasAtrasadas(renderizarAtrasos);
-  // Os gráficos e cards do dashboard usam as mesmas fontes de dados já
-  // existentes (ocorrencias/entradas-atrasadas), então toda vez que os dados
-  // mudarem em qualquer aba, o dashboard deve recarregar junto.
-  Dados.aoMudar(renderizarDashboard);
-  Dados.aoMudarEntradasAtrasadas(renderizarDashboard);
+  // A camada de dados (js/dados.js) dispara estes eventos sempre que o
+  // servidor tiver novidade — inclusive quando o registro foi feito em
+  // OUTRO aparelho (o celular do professor, por exemplo). Como cada
+  // renderização já vai buscar tudo no servidor, quem é avisado só
+  // precisa pedir um novo desenho do painel.
+  Dados.aoMudar(renderizar);
+  Dados.aoMudarEntradasAtrasadas(renderizar);
+  // A lista de alunos (GET /alunos) também vem do servidor: quando ela
+  // chegar, os cards de "total de alunos" precisam ser recalculados.
+  window.addEventListener("alunos:carregados", () => renderizarCards());
   renderizar();
 })();
 
