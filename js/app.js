@@ -98,15 +98,28 @@ function showView(id) {
   const form = document.getElementById("al-form-login");
   const mensagemErro = document.getElementById("al-mensagem-erro");
 
-  form.addEventListener("submit", (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const ra = document.getElementById("al-ra").value.trim();
-    const senha = document.getElementById("al-senha").value.trim();
 
-    const aluno = Dados.autenticarAluno(ra, senha);
+    // O acesso do aluno é feito pelo RA + senha fixa: o RA precisa
+    // existir no alunos.json (o sistema identifica sozinho o nome, a
+    // sala e o turno) e a senha precisa ser exatamente "@Coronel2026".
+    // RA inexistente ou senha errada = login bloqueado.
+    const ra = document.getElementById("al-ra").value.trim();
+    const senha = document.getElementById("al-senha").value;
+
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    const aluno = await Dados.autenticarAluno(ra, senha);
 
     if (!aluno) {
-      mensagemErro.textContent = "RA ou senha inválidos";
+      mensagemErro.textContent = Dados.alunosCarregados()
+        ? "RA não encontrado ou senha incorreta."
+        : "Não foi possível carregar a lista de alunos (alunos.json).";
       mensagemErro.style.display = "block";
       return;
     }
@@ -298,7 +311,7 @@ function prepararNovaOcorrencia() {
 
     campoAlunoNome.value = aluno.nome;
     campoAlunoRa.value = aluno.ra;
-    campoTurma.value = aluno.turma || "";
+    campoTurma.value = aluno.sala || aluno.turma || "";
   });
 
   prepararSeletorAlunos();
@@ -306,6 +319,12 @@ function prepararNovaOcorrencia() {
   // exposto para prepararNovaOcorrencia() poder recomeçar o seletor
   // do zero sempre que a tela de nova ocorrência for aberta
   window.prepararSeletorAlunos = prepararSeletorAlunos;
+
+  // quando o alunos.json terminar de ser lido, se o professor ainda não
+  // escolheu nada, o seletor é montado com a lista do arquivo
+  window.addEventListener("alunos:carregados", () => {
+    if (!seletorTurno.value) prepararSeletorAlunos();
+  });
 
   const form = document.getElementById("oc-form-ocorrencia");
   const mensagemErro = document.getElementById("oc-mensagem-erro");
@@ -331,7 +350,7 @@ function prepararNovaOcorrencia() {
       professorNome: sessao.nome,
       alunoNome: aluno.nome,
       alunoRa: aluno.ra,
-      turma: aluno.turma || "",
+      turma: aluno.sala || aluno.turma || "",
       tipo: tipoSelecionado,
       gravidade: gravidadeSelecionada,
       detalhes,
@@ -359,7 +378,12 @@ function prepararEntradaAtrasada() {
   document.getElementById("atr-nome-aluno").textContent = sessao.nome;
   document.getElementById("atr-aluno-nome").value = sessao.nome;
   document.getElementById("atr-aluno-ra").value = sessao.ra;
-  document.getElementById("atr-turma").value = sessao.turma || "";
+
+  // sala e turno vêm SEMPRE do alunos.json (identificados pelo RA no
+  // login): o aluno não escolhe nem altera esses dados, só vê a sala
+  const campoTurmaAtraso = document.getElementById("atr-turma");
+  campoTurmaAtraso.value = sessao.sala || sessao.turma || "";
+  campoTurmaAtraso.readOnly = true;
 }
 
 (function () {
@@ -377,7 +401,9 @@ function prepararEntradaAtrasada() {
     mensagemErro.style.display = "none";
 
     const sessao = Sessao.obter();
-    const turma = document.getElementById("atr-turma").value.trim();
+    // a sala/turma NUNCA vem do que o aluno digitou: vem do alunos.json,
+    // identificada pelo RA na hora do login
+    const turma = sessao.sala || sessao.turma || "";
     const motivo = document.getElementById("atr-motivo").value.trim();
 
     if (!motivo) {
@@ -397,9 +423,7 @@ function prepararEntradaAtrasada() {
     form.reset();
     document.getElementById("atr-aluno-nome").value = sessao.nome;
     document.getElementById("atr-aluno-ra").value = sessao.ra;
-    if (sessao.turma) {
-      document.getElementById("atr-turma").value = sessao.turma;
-    }
+    document.getElementById("atr-turma").value = sessao.sala || sessao.turma || "";
 
     mensagemSucesso.style.display = "block";
     setTimeout(() => (mensagemSucesso.style.display = "none"), 3000);
@@ -504,7 +528,7 @@ function prepararEntradaAtrasada() {
     const ocorrenciasHoje = ocorrencias.filter((o) => ehMesmoDia(o.criadaEm, hoje)).length;
     const atrasosHoje = atrasos.filter((a) => ehMesmoDia(a.criadaEm, hoje)).length;
 
-    const totalAlunos = ALUNOS.length;
+    const totalAlunos = Dados.listarAlunos().length;
     const alunosComOcorrencia = new Set(ocorrencias.map((o) => o.alunoRa)).size;
     const alunosSemOcorrencia = Math.max(0, totalAlunos - alunosComOcorrencia);
     const percentualSemOcorrencia = totalAlunos > 0
@@ -518,17 +542,30 @@ function prepararEntradaAtrasada() {
   }
 
   /* ---------------------------------------------------------------
-     DASHBOARD — GRÁFICO DE OCORRÊNCIAS POR TIPO
+     DASHBOARD — GRÁFICO DE OCORRÊNCIAS (ÚLTIMOS 7 DIAS)
+     ================================================================
+     Mesma estrutura visual do gráfico "Entradas atrasadas · últimos 7
+     dias" (barras), mas usando como fonte os registros de ocorrências:
+     conta quantas ocorrências foram registradas em cada um dos últimos
+     7 dias. Os números mudam automaticamente quando uma nova ocorrência
+     é registrada (renderizar() é chamado pelo evento "ocorrencias:mudou"
+     e pelos botões de status da listagem).
      --------------------------------------------------------------- */
   function renderizarGraficoTipos() {
     const container = document.getElementById("pn-grafico-tipos");
     const ocorrencias = Dados.listarOcorrencias();
 
-    const tipos = ["INDISCIPLINA", "ATRASO", "MATERIAL", "SAUDE", "OUTRO"];
-    const contagem = tipos.map((tipo) => ({
-      tipo,
-      rotulo: ROTULO_TIPO[tipo],
-      total: ocorrencias.filter((o) => o.tipo === tipo).length,
+    const dias = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dias.push(d);
+    }
+
+    const contagem = dias.map((dia) => ({
+      dia,
+      rotulo: dia.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", ""),
+      total: ocorrencias.filter((o) => ehMesmoDia(o.criadaEm, dia)).length,
     }));
 
     const maximo = Math.max(1, ...contagem.map((c) => c.total));
@@ -536,7 +573,7 @@ function prepararEntradaAtrasada() {
     container.innerHTML = contagem.map((c) => `
       <div class="barra-coluna">
         <span class="barra-valor">${c.total}</span>
-        <div class="barra-preenchimento" style="height:${Math.max(4, (c.total / maximo) * 100)}%; background:${CORES_TIPO[c.tipo]};"></div>
+        <div class="barra-preenchimento" style="height:${Math.max(4, (c.total / maximo) * 100)}%; background:var(--amber);"></div>
         <span class="barra-rotulo">${c.rotulo}</span>
       </div>
     `).join("");
@@ -801,6 +838,11 @@ function prepararEntradaAtrasada() {
 
   Dados.aoMudar(renderizarOcorrencias);
   Dados.aoMudarEntradasAtrasadas(renderizarAtrasos);
+  // Os gráficos e cards do dashboard usam as mesmas fontes de dados já
+  // existentes (ocorrencias/entradas-atrasadas), então toda vez que os dados
+  // mudarem em qualquer aba, o dashboard deve recarregar junto.
+  Dados.aoMudar(renderizarDashboard);
+  Dados.aoMudarEntradasAtrasadas(renderizarDashboard);
   renderizar();
 })();
 
