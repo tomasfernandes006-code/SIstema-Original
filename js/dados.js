@@ -94,7 +94,7 @@ const ARQUIVO_PROFESSORES = "professores.json";
 
 // senha fixa de TODOS os professores (a mesma para todos; o login exige
 // o RA existente no professores.json + esta senha exata)
-const SENHA_PROFESSORES = "@Coronel2026";
+const SENHA_PROFESSORES = "Professor2026@";
 
 let PROFESSORES = [];              // lista já validada, vinda do professores.json
 let professoresProntos = false;    // true quando o arquivo foi lido sem erro
@@ -481,7 +481,7 @@ const Dados = {
      PROFESSORES — tudo vem do professores.json
      (ver carregarProfessoresDoArquivo). O professor entra com o RA
      (identificador único) e a senha fixa: o RA precisa existir no
-     professores.json e a senha precisa ser exatamente "@Coronel2026"
+     professores.json e a senha precisa ser exatamente "Professor2026@"
      (SENHA_PROFESSORES). O NOME do professor é identificado
      automaticamente a partir do RA. RA inexistente ou senha errada =
      login negado.
@@ -497,7 +497,7 @@ const Dados = {
 
     const raDigitado = comoTexto(ra);
     if (!raDigitado) return null;
-    // senha precisa ser EXATAMENTE igual (sem cortar espaços): "@Coronel2026"
+    // senha precisa ser EXATAMENTE igual (sem cortar espaços): "Professor2026@"
     if (String(senha ?? "") !== SENHA_PROFESSORES) return null;
 
     const professor = PROFESSORES.find((p) => p.ra === raDigitado);
