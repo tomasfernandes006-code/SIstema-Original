@@ -58,7 +58,7 @@ a { color: inherit; }
 }
 
 /* ---------------------------------------------------------------
-   TELAS DO SISTEMA (sistema.html) — cada "página" antiga agora é
+   TELAS DO SISTEMA (index.html) — cada "página" antiga agora é
    um bloco que aparece/desaparece dentro do mesmo arquivo
    --------------------------------------------------------------- */
 .view { display: none; }

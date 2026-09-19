@@ -1,11 +1,11 @@
 /* =====================================================================
-   ROTEADOR — troca de tela dentro do arquivo central (sistema.html)
+   ROTEADOR — troca de tela dentro do arquivo central (index.html)
    ---------------------------------------------------------------------
    Antes cada tela era um arquivo .html separado (index.html,
    professor.html, nova-ocorrencia.html, etc.) e a navegação era feita
    trocando de página (window.location.href = "...").
 
-   Agora todas as telas vivem dentro de sistema.html, como blocos
+   Agora todas as telas vivem dentro de index.html, como blocos
    <div class="view" id="view-NOME">. Este arquivo decide qual bloco
    fica visível a cada momento — e, o mais importante, aplica as
    MESMAS regras de acesso de antes: só é possível ver a tela de
@@ -951,7 +951,7 @@ let qrcodeGerado = false;
 function prepararQrCode() {
   const campoUrl = document.getElementById("qr-url");
   if (!qrcodeGerado) {
-    // por padrao sugere o endereco atual deste arquivo (sistema.html);
+    // por padrao sugere o endereco atual deste arquivo (index.html);
     // troque pelo IP do computador na rede da escola, ou pelo endereco
     // final quando publicar o site
     campoUrl.value = window.location.href.split("#")[0];

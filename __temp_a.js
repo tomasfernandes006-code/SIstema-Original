@@ -1,1 +1,0 @@
-c:/Users/itosh/Downloads/Sistema Falso/js/app.js
