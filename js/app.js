@@ -556,7 +556,10 @@ function prepararEntradaAtrasada() {
            d.getDate() === dataRef.getDate();
   }
 
-  let filtroAtual = "abertas"; // "abertas" | "todas"
+  // cada seção do painel tem o seu próprio filtro, para que trocar o
+  // filtro em "Ocorrências" não mude o que aparece em "Entradas atrasadas"
+  let filtroOcorrencias = "abertas"; // "abertas" | "todas"
+  let filtroAtrasos = "abertas"; // "abertas" | "todas"
 
   /* ---------------------------------------------------------------
      DADOS DO PAINEL
@@ -778,7 +781,7 @@ function prepararEntradaAtrasada() {
   function renderizarOcorrencias() {
     // a "foto" dos dados já foi atualizada por carregarDados()
     const todas = ocorrenciasDoPainel;
-    const lista = filtroAtual === "abertas"
+    const lista = filtroOcorrencias === "abertas"
       ? todas.filter((o) => o.status !== "RESOLVIDA")
       : todas;
     const container = document.getElementById("pn-lista-ocorrencias");
@@ -840,7 +843,7 @@ function prepararEntradaAtrasada() {
   function renderizarAtrasos() {
     // a "foto" dos dados já foi atualizada por carregarDados()
     const todas = atrasosDoPainel;
-    const lista = filtroAtual === "abertas"
+    const lista = filtroAtrasos === "abertas"
       ? todas.filter((ent) => ent.status !== "RESOLVIDA")
       : todas;
     const container = document.getElementById("pn-lista-atrasos");
@@ -932,9 +935,25 @@ function prepararEntradaAtrasada() {
 
   document.querySelectorAll(".filtro-btn").forEach((botao) => {
     botao.addEventListener("click", () => {
-      document.querySelectorAll(".filtro-btn").forEach((b) => b.classList.remove("ativo"));
+      // cada seção tem o seu próprio grupo de botões: descobrimos a qual
+      // seção o botão clicado pertence para (1) destacar só ele dentro
+      // dessa seção e (2) mexer apenas no filtro dessa seção
+      const secao = botao.closest(".painel-secao");
+
+      // remove o "ativo" apenas dos botões da MESMA seção, para não
+      // apagar o destaque do filtro escolhido na outra seção
+      if (secao) {
+        secao.querySelectorAll(".filtro-btn").forEach((b) => b.classList.remove("ativo"));
+      }
       botao.classList.add("ativo");
-      filtroAtual = botao.dataset.filtro;
+
+      // atualiza somente o filtro da seção do botão clicado
+      if (secao && secao.id === "pn-secao-ocorrencias") {
+        filtroOcorrencias = botao.dataset.filtro;
+      } else if (secao && secao.id === "pn-secao-atrasos") {
+        filtroAtrasos = botao.dataset.filtro;
+      }
+
       renderizar();
     });
   });
