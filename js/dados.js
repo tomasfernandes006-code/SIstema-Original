@@ -708,3 +708,8 @@ garantirAlunosCarregados();
 // professores). Além disso, o login do professor relê o arquivo a cada
 // tentativa, então editar o arquivo vale na hora, sem reiniciar nada.
 garantirProfessoresCarregados();
+
+// o dados.js agora é um módulo (type="module" no index.html), então o
+// "Dados" deixaria de ser global e o app.js não o encontraria. Esta linha
+// devolve o objeto para o escopo global, como era antes dos módulos.
+window.Dados = Dados;

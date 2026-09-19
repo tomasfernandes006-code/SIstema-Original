@@ -981,3 +981,8 @@ function gerarQrCode() {
     colorLight: "#ffffff",
   });
 }
+
+// o app.js agora é um módulo (type="module" no index.html): funções
+// chamadas direto pelo HTML (onclick="...") precisam ficar globais,
+// como eram quando o arquivo era um script clássico.
+window.showView = showView;
