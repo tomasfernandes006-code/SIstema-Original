@@ -1,3 +1,8 @@
+import { db } from "./firebase-config.js";
+import {
+  collection, addDoc, getDocs, doc, updateDoc, query, orderBy
+} from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+
 /* =====================================================================
    CAMADA DE DADOS (SIMULADA)
    ---------------------------------------------------------------------
@@ -441,35 +446,33 @@ function garantirProfessoresCarregados() {
   return promessaProfessores;
 }
 
-function lerOcorrencias() {
-  try {
-    const bruto = localStorage.getItem(CHAVE_OCORRENCIAS);
-    return bruto ? JSON.parse(bruto) : [];
-  } catch {
-    return [];
-  }
+// lê a coleção "ocorrencias" no Firestore, da mais recente para a mais antiga
+// (orderBy "criadaEm" desc: a ocorrência nova aparece em cima na tela).
+// Cada documento vira { id: <id do documento>, ...campos gravados } — esse
+// "id" é o que os botões de status usam para achar o documento no updateDoc.
+async function lerOcorrencias() {
+  const resultado = await getDocs(
+    query(collection(db, "ocorrencias"), orderBy("criadaEm", "desc"))
+  );
+  return resultado.docs.map((documento) => ({ ...documento.data(), id: documento.id }));
 }
 
-function salvarOcorrencias(lista) {
-  localStorage.setItem(CHAVE_OCORRENCIAS, JSON.stringify(lista));
-  // dispara um evento próprio (além do "storage" nativo) pra atualizar
-  // a mesma aba que acabou de salvar, sem precisar recarregar a página
+// avisa quem estiver escutando (ver aoMudar) que a coleção desta aba mudou,
+// pra tela se redesenhar sem precisar recarregar a página
+function avisarMudancaOcorrencias() {
   window.dispatchEvent(new CustomEvent("ocorrencias:mudou"));
 }
 
-function lerEntradasAtrasadas() {
-  try {
-    const bruto = localStorage.getItem(CHAVE_ENTRADAS_ATRASADAS);
-    return bruto ? JSON.parse(bruto) : [];
-  } catch {
-    return [];
-  }
+// mesma coisa da coleção "ocorrencias", agora para a coleção "atrasos"
+async function lerEntradasAtrasadas() {
+  const resultado = await getDocs(
+    query(collection(db, "atrasos"), orderBy("criadaEm", "desc"))
+  );
+  return resultado.docs.map((documento) => ({ ...documento.data(), id: documento.id }));
 }
 
-function salvarEntradasAtrasadas(lista) {
-  localStorage.setItem(CHAVE_ENTRADAS_ATRASADAS, JSON.stringify(lista));
-  // mesmo esquema do "ocorrencias:mudou": evento próprio pra esta aba +
-  // evento nativo "storage" pra outras abas do mesmo navegador
+// mesmo esquema do "ocorrencias:mudou": evento próprio pra esta aba
+function avisarMudancaEntradasAtrasadas() {
   window.dispatchEvent(new CustomEvent("entradas-atrasadas:mudou"));
 }
 
@@ -608,10 +611,10 @@ const Dados = {
     return ALUNOS.find((a) => a.ra === raBuscado) || null;
   },
 
-  criarOcorrencia({ professorId, professorNome, alunoNome, alunoRa, turma, tipo, gravidade, detalhes }) {
-    const lista = lerOcorrencias();
+  // grava uma ocorrência nova na coleção "ocorrencias" do Firestore
+  // (o addDoc gera o id do documento automaticamente)
+  async criarOcorrencia({ professorId, professorNome, alunoNome, alunoRa, turma, tipo, gravidade, detalhes }) {
     const nova = {
-      id: String(Date.now()) + Math.floor(Math.random() * 1000),
       professorId,
       professorNome,
       alunoNome,
@@ -624,25 +627,24 @@ const Dados = {
       criadaEm: new Date().toISOString(),
       atualizadaEm: new Date().toISOString(),
     };
-    lista.unshift(nova);
-    salvarOcorrencias(lista);
-    return nova;
+    const referencia = await addDoc(collection(db, "ocorrencias"), nova);
+    avisarMudancaOcorrencias();
+    // devolve a ocorrência já com o id do documento criado no Firestore
+    return { id: referencia.id, ...nova };
   },
 
-  listarOcorrencias({ apenasAbertas } = {}) {
-    const lista = lerOcorrencias();
+  async listarOcorrencias({ apenasAbertas } = {}) {
+    const lista = await lerOcorrencias();
     if (!apenasAbertas) return lista;
     return lista.filter((o) => o.status !== "RESOLVIDA");
   },
 
-  atualizarStatus(id, novoStatus) {
-    const lista = lerOcorrencias();
-    const item = lista.find((o) => o.id === id);
-    if (!item) return null;
-    item.status = novoStatus;
-    item.atualizadaEm = new Date().toISOString();
-    salvarOcorrencias(lista);
-    return item;
+  // muda só o campo "status" do documento correspondente na coleção
+  // "ocorrencias" (o id é o id do documento no Firestore)
+  async atualizarStatus(id, novoStatus) {
+    await updateDoc(doc(db, "ocorrencias", id), { status: novoStatus });
+    avisarMudancaOcorrencias();
+    return { id, status: novoStatus };
   },
 
   // chama callback toda vez que os dados mudarem — seja nesta aba
@@ -657,10 +659,10 @@ const Dados = {
     });
   },
 
-  criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo }) {
-    const lista = lerEntradasAtrasadas();
+  // grava uma entrada atrasada nova na coleção "atrasos" do Firestore
+  // (o addDoc gera o id do documento automaticamente)
+  async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo }) {
     const nova = {
-      id: String(Date.now()) + Math.floor(Math.random() * 1000),
       alunoId,
       alunoNome,
       alunoRa,
@@ -670,25 +672,23 @@ const Dados = {
       criadaEm: new Date().toISOString(),
       atualizadaEm: new Date().toISOString(),
     };
-    lista.unshift(nova);
-    salvarEntradasAtrasadas(lista);
-    return nova;
+    const referencia = await addDoc(collection(db, "atrasos"), nova);
+    avisarMudancaEntradasAtrasadas();
+    // devolve a entrada atrasada já com o id do documento criado no Firestore
+    return { id: referencia.id, ...nova };
   },
 
-  listarEntradasAtrasadas({ apenasAbertas } = {}) {
-    const lista = lerEntradasAtrasadas();
+  async listarEntradasAtrasadas({ apenasAbertas } = {}) {
+    const lista = await lerEntradasAtrasadas();
     if (!apenasAbertas) return lista;
     return lista.filter((e) => e.status !== "RESOLVIDA");
   },
 
-  atualizarStatusEntradaAtrasada(id, novoStatus) {
-    const lista = lerEntradasAtrasadas();
-    const item = lista.find((e) => e.id === id);
-    if (!item) return null;
-    item.status = novoStatus;
-    item.atualizadaEm = new Date().toISOString();
-    salvarEntradasAtrasadas(lista);
-    return item;
+  // muda só o campo "status" do documento correspondente na coleção "atrasos"
+  async atualizarStatusEntradaAtrasada(id, novoStatus) {
+    await updateDoc(doc(db, "atrasos", id), { status: novoStatus });
+    avisarMudancaEntradasAtrasadas();
+    return { id, status: novoStatus };
   },
 
   // igual ao aoMudar acima, mas pra fila de entradas atrasadas
