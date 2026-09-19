@@ -43,15 +43,15 @@ db.exec(`
 `);
 
 // ---------------------------------------------------------------
-// USUÁRIOS (professor / secretaria) — os mesmos de antes, fixos
+// USUÁRIOS — só a SECRETARIA fica fixa aqui. Os PROFESSORES ficam
+// exclusivamente no arquivo professores.json.
 // ---------------------------------------------------------------
 const USUARIOS = [
-  { id: "p1", nome: "Ana Souza", matricula: "1001", pin: "1234", tipo: "PROFESSOR" },
-  { id: "p2", nome: "Carlos Lima", matricula: "1002", pin: "5678", tipo: "PROFESSOR" },
   { id: "s1", nome: "Secretaria Central", usuario: "secretaria", senha: "1234", tipo: "SECRETARIA" },
 ];
 
 const SENHA_ALUNOS = "@Coronel2026";
+const SENHA_PROFESSORES = "@Coronel2026";
 
 // ---------------------------------------------------------------
 // ALUNOS — lidos do alunos.json (coloque uma cópia dele do lado
@@ -64,15 +64,67 @@ function lerAlunos() {
 }
 
 // ---------------------------------------------------------------
+// PROFESSORES — lidos do professores.json A CADA REQUISIÇÃO: é a
+// ÚNICA fonte de dados dos professores. O arquivo é procurado primeiro
+// na raiz do projeto (do lado do index.html) e, se não existir, ao lado
+// deste servidor.js. Como o arquivo é relido a cada login, adicionar,
+// remover ou renomear um professor já vale na próxima tentativa, sem
+// reiniciar o servidor.
+// ---------------------------------------------------------------
+function caminhoProfessores() {
+  const naRaiz = path.join(__dirname, "..", "professores.json");
+  return fs.existsSync(naRaiz) ? naRaiz : path.join(__dirname, "professores.json");
+}
+
+// RA usado para identificar/comparar o professor no login (sem espaços
+// nas pontas; o RA nunca pode ficar vazio)
+function normalizarRa(valor) {
+  return valor === null || valor === undefined ? "" : String(valor).trim();
+}
+
+function lerProfessores() {
+  const conteudo = fs.readFileSync(caminhoProfessores(), "utf8");
+  const lista = JSON.parse(conteudo);
+  if (!Array.isArray(lista)) {
+    throw new Error("professores.json precisa ser uma lista (array) de professores");
+  }
+  // cada professor tem os campos "RA" e "nome"; entradas sem eles são ignoradas
+  return lista
+    .map((item) => ({
+      RA: item && item.RA != null ? String(item.RA).trim() : "",
+      nome: item && item.nome != null ? String(item.nome).trim() : "",
+    }))
+    .filter((item) => item.RA && item.nome);
+}
+
+// ---------------------------------------------------------------
 // LOGIN
 // ---------------------------------------------------------------
 app.post("/login/professor", (req, res) => {
-  const { matricula, pin } = req.body;
-  const professor = USUARIOS.find(
-    (u) => u.tipo === "PROFESSOR" && u.matricula === matricula && u.pin === pin
-  );
-  if (!professor) return res.status(401).json({ erro: "Matrícula ou PIN inválidos" });
-  res.json(professor);
+  const { ra, senha } = req.body;
+  // senha fixa de todos os professores: "@Coronel2026"
+  if (String(senha ?? "") !== SENHA_PROFESSORES) {
+    return res.status(401).json({ erro: "RA ou senha inválidos" });
+  }
+
+  let professores = [];
+  try {
+    professores = lerProfessores();
+  } catch (erro) {
+    console.error("Não foi possível ler o professores.json:", erro);
+    return res.status(500).json({ erro: "Não foi possível carregar a lista de professores" });
+  }
+
+  const raDigitado = normalizarRa(ra);
+  const professor = professores.find((p) => p.RA === raDigitado);
+  if (!professor) return res.status(401).json({ erro: "RA ou senha inválidos" });
+
+  res.json({
+    id: "professor-" + professor.RA,
+    tipo: "PROFESSOR",
+    ra: professor.RA,
+    nome: professor.nome,
+  });
 });
 
 app.post("/login/secretaria", (req, res) => {

@@ -23,10 +23,10 @@
 const CHAVE_OCORRENCIAS = "livro-ocorrencias:dados";
 const CHAVE_ENTRADAS_ATRASADAS = "livro-ocorrencias:entradas-atrasadas";
 
-// ---- usuários de teste (fixos no código por enquanto) ----
+// ---- usuários fixos no código ----
+// Só a SECRETARIA continua aqui. Os PROFESSORES ficam exclusivamente
+// no arquivo professores.json (ver seção PROFESSORES logo abaixo).
 const USUARIOS = [
-  { id: "p1", nome: "Ana Souza", matricula: "1001", pin: "1234", tipo: "PROFESSOR" },
-  { id: "p2", nome: "Carlos Lima", matricula: "1002", pin: "5678", tipo: "PROFESSOR" },
   { id: "s1", nome: "Secretaria Central", usuario: "secretaria", senha: "1234", tipo: "SECRETARIA" },
 ];
 
@@ -61,6 +61,40 @@ let ALUNOS = [];              // lista já validada, vinda do alunos.json
 let alunosProntos = false;    // true quando o arquivo foi lido sem erro
 let problemasDosAlunos = [];  // problemas de validação encontrados no arquivo
 let promessaAlunos = null;    // controla a leitura (evita ler o arquivo 2x)
+
+/* ---------------------------------------------------------------------
+   PROFESSORES — TODOS ficam em UM ÚNICO arquivo: professores.json
+   ---------------------------------------------------------------------
+   O arquivo professores.json fica na raiz do projeto (do lado do
+   index.html) e é a ÚNICA fonte de dados dos professores: nenhum
+   professor fica fixo aqui no código.
+
+   Cada professor do professores.json tem exatamente estes campos:
+
+     {
+       "RA":   "1001",           <- identificador único do professor: não
+                                    pode ficar vazio nem repetir
+       "nome": "Ana Souza"       <- não pode ficar vazio
+     }
+
+   No login o professor informa o RA e a senha: o nome do professor é
+   identificado automaticamente a partir do RA.
+
+   Para adicionar, remover ou corrigir um professor, edite SOMENTE o
+   professores.json — o login relê o arquivo a cada tentativa, então a
+   mudança já vale na hora, sem precisar reiniciar o sistema. (Se
+   estiver usando o servidor em servidor/, ele lê este mesmo arquivo.)
+   --------------------------------------------------------------------- */
+const ARQUIVO_PROFESSORES = "professores.json";
+
+// senha fixa de TODOS os professores (a mesma para todos; o login exige
+// o RA existente no professores.json + esta senha exata)
+const SENHA_PROFESSORES = "@Coronel2026";
+
+let PROFESSORES = [];              // lista já validada, vinda do professores.json
+let professoresProntos = false;    // true quando o arquivo foi lido sem erro
+let problemasDosProfessores = [];  // problemas de validação encontrados no arquivo
+let promessaProfessores = null;    // controla a leitura (evita ler o arquivo 2x)
 
 // devolve o valor como texto, sem espaços nas pontas ("" se não for texto)
 function comoTexto(valor) {
@@ -245,6 +279,168 @@ function garantirAlunosCarregados() {
   return promessaAlunos;
 }
 
+// aplica as validações em cada professor lido do arquivo:
+//   - RA não pode ficar vazio e não pode repetir
+//   - nome não pode ficar vazio
+// Professores inválidos são IGNORADOS e o motivo é registrado em
+// problemasDosProfessores (também aparece no console do navegador).
+function validarProfessores(listaBruta) {
+  const validos = [];
+  const problemas = [];
+  const rasJaVistos = new Set();
+
+  listaBruta.forEach((item, indice) => {
+    const onde = `professores.json (professor nº ${indice + 1})`;
+
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      problemas.push(
+        `${onde}: não é um professor válido (precisa ter os campos RA e nome) — ignorado.`
+      );
+      return;
+    }
+
+    const professor = {
+      RA: comoTexto(item.RA),
+      nome: comoTexto(item.nome),
+    };
+
+    const vazios = [];
+    if (!professor.RA) vazios.push("RA");
+    if (!professor.nome) vazios.push("nome");
+
+    if (vazios.length) {
+      problemas.push(
+        `${onde}${professor.RA ? " (RA " + professor.RA + ")" : ""}: campo(s) vazio(s): ` +
+          `${vazios.join(", ")} — professor ignorado.`
+      );
+      return;
+    }
+
+    if (rasJaVistos.has(professor.RA)) {
+      problemas.push(`${onde} (${professor.nome}): RA ${professor.RA} duplicado — professor ignorado.`);
+      return;
+    }
+
+    rasJaVistos.add(professor.RA);
+    validos.push(professor);
+  });
+
+  return { validos, problemas };
+}
+
+// converte o professor lido do arquivo para o formato usado pelas telas
+// e pela sessão (o RA vira o "id" do professor: id = "professor-1001" e
+// o nome é identificado automaticamente a partir do RA)
+function montarProfessor(professorDoArquivo) {
+  return {
+    id: "professor-" + professorDoArquivo.RA,
+    tipo: "PROFESSOR",
+    ra: professorDoArquivo.RA,
+    nome: professorDoArquivo.nome,
+  };
+}
+
+// lê o professores.json de verdade (mesma estratégia usada no
+// alunos.json: fetch e, se precisar, XMLHttpRequest). Como roda de novo
+// a cada login, editar o arquivo já vale sem reiniciar o sistema.
+async function carregarProfessoresDoArquivo() {
+  const caminhos = [
+    ARQUIVO_PROFESSORES,
+    "./" + ARQUIVO_PROFESSORES,
+    new URL(ARQUIVO_PROFESSORES, window.location.href).href, // mesma pasta do index.html
+  ];
+
+  let ultimoErro = null;
+  let conteudo = null;
+
+  for (const caminho of caminhos) {
+    // ---- tentativa 1: fetch (funciona em qualquer servidor HTTP) ----
+    try {
+      const resposta = await fetch(caminho, { cache: "no-store" });
+      if (!resposta.ok) throw new Error(`o servidor respondeu ${resposta.status}`);
+      conteudo = await resposta.json();
+      break;
+    } catch (erro) {
+      ultimoErro = erro;
+    }
+
+    // ---- tentativa 2: XMLHttpRequest (alguns navegadores permitem
+    //      ler a pasta do projeto pelo XHR mesmo com a página aberta
+    //      direto do disco, via file://) ----
+    try {
+      const texto = await new Promise((resolver, falhar) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", caminho, true);
+        xhr.overrideMimeType("application/json");
+        xhr.onload = () =>
+          xhr.status === 0 || xhr.status === 200
+            ? resolver(xhr.responseText)
+            : falhar(new Error(`XHR respondeu ${xhr.status}`));
+        xhr.onerror = () => falhar(new Error("XHR bloqueado pelo navegador"));
+        xhr.send();
+      });
+      conteudo = JSON.parse(texto);
+      break;
+    } catch (erro) {
+      ultimoErro = erro;
+    }
+  }
+
+  try {
+    if (conteudo === null) {
+      throw ultimoErro || new Error("arquivo não encontrado");
+    }
+    if (!Array.isArray(conteudo)) {
+      throw new Error("o conteúdo precisa ser uma lista (array) de professores");
+    }
+
+    const { validos, problemas } = validarProfessores(conteudo);
+    PROFESSORES = validos.map(montarProfessor);
+    problemasDosProfessores = problemas;
+    professoresProntos = true;
+
+    if (problemas.length) {
+      console.warn(
+        `professores.json: ${problemas.length} problema(s) encontrado(s):\n- ` +
+          problemas.join("\n- ")
+      );
+    }
+  } catch (erro) {
+    PROFESSORES = [];
+    problemasDosProfessores = [];
+    professoresProntos = false;
+    console.error(
+      "Não foi possível ler o arquivo professores.json.\n" +
+        "Confira se o arquivo existe na MESMA pasta do index.html.\n" +
+        (window.location.protocol === "file:"
+          ? "A página está aberta direto do disco (file://) e o navegador " +
+            "bloqueia a leitura de arquivos locais. Abra o sistema por um " +
+            "servidor para o login funcionar: extensão Live Server do VS " +
+            "Code, \"python -m http.server\" nesta pasta, ou GitHub Pages."
+          : "Se estiver usando um servidor, confira se ele serve a pasta do projeto."),
+      erro
+    );
+  } finally {
+    // avisa as telas que a lista de professores (re)carregou
+    window.dispatchEvent(new CustomEvent("professores:carregados"));
+  }
+
+  return PROFESSORES;
+}
+
+// garante que o arquivo já foi lido antes de responder (usado no login)
+function garantirProfessoresCarregados() {
+  if (professoresProntos) return Promise.resolve(PROFESSORES);
+  if (!promessaProfessores) {
+    promessaProfessores = carregarProfessoresDoArquivo().then((lista) => {
+      // se deu erro, libera para tentar de novo no próximo login
+      if (!professoresProntos) promessaProfessores = null;
+      return lista;
+    });
+  }
+  return promessaProfessores;
+}
+
 function lerOcorrencias() {
   try {
     const bruto = localStorage.getItem(CHAVE_OCORRENCIAS);
@@ -278,10 +474,56 @@ function salvarEntradasAtrasadas(lista) {
 }
 
 const Dados = {
-  autenticarProfessor(matricula, pin) {
-    return USUARIOS.find(
-      (u) => u.tipo === "PROFESSOR" && u.matricula === matricula && u.pin === pin
-    ) || null;
+  /* ---------------------------------------------------------------
+     PROFESSORES — tudo vem do professores.json
+     (ver carregarProfessoresDoArquivo). O professor entra com o RA
+     (identificador único) e a senha fixa: o RA precisa existir no
+     professores.json e a senha precisa ser exatamente "@Coronel2026"
+     (SENHA_PROFESSORES). O NOME do professor é identificado
+     automaticamente a partir do RA. RA inexistente ou senha errada =
+     login negado.
+     --------------------------------------------------------------- */
+  async autenticarProfessor(ra, senha) {
+    // relê o arquivo a cada tentativa: assim adicionar, remover ou
+    // alterar um professor já vale no login seguinte, sem reiniciar
+    PROFESSORES = [];
+    professoresProntos = false;
+    promessaProfessores = null;
+
+    await garantirProfessoresCarregados();
+
+    const raDigitado = comoTexto(ra);
+    if (!raDigitado) return null;
+    // senha precisa ser EXATAMENTE igual (sem cortar espaços): "@Coronel2026"
+    if (String(senha ?? "") !== SENHA_PROFESSORES) return null;
+
+    const professor = PROFESSORES.find((p) => p.ra === raDigitado);
+    return professor ? { ...professor } : null;
+  },
+
+  // força uma nova leitura do professores.json (a lista já é relida a
+  // cada login; isto serve para recarregar sem fechar a página)
+  carregarProfessores() {
+    PROFESSORES = [];
+    professoresProntos = false;
+    promessaProfessores = null;
+    return garantirProfessoresCarregados();
+  },
+
+  // true quando o professores.json foi lido com sucesso
+  professoresCarregados() {
+    return professoresProntos;
+  },
+
+  // problemas de validação encontrados no professores.json (RA/nome
+  // vazios ou RA duplicado)
+  problemasProfessores() {
+    return problemasDosProfessores.slice();
+  },
+
+  // lista todos os professores válidos do professores.json
+  listarProfessores() {
+    return PROFESSORES.slice();
   },
 
   autenticarSecretaria(usuario, senha) {
@@ -461,3 +703,8 @@ const Dados = {
 // lê o alunos.json assim que o sistema abre (é a única fonte de dados
 // dos alunos). O login do aluno espera essa leitura terminar.
 garantirAlunosCarregados();
+
+// mesma coisa para o professores.json (única fonte de dados dos
+// professores). Além disso, o login do professor relê o arquivo a cada
+// tentativa, então editar o arquivo vale na hora, sem reiniciar nada.
+garantirProfessoresCarregados();

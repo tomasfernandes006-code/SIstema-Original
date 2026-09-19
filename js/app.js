@@ -70,16 +70,22 @@ function showView(id) {
   const form = document.getElementById("pl-form-login");
   const mensagemErro = document.getElementById("pl-mensagem-erro");
 
-  // o login agora é conferido no SERVIDOR (POST /login/professor), então
+  // o login é conferido no professores.json a cada tentativa, então
   // o envio do formulário precisa esperar a resposta (async / await)
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const matricula = document.getElementById("pl-matricula").value.trim();
-    const pin = document.getElementById("pl-pin").value.trim();
+    const ra = document.getElementById("pl-ra").value.trim();
+    const senha = document.getElementById("pl-senha").value;
+
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
 
     let professor;
     try {
-      professor = await Dados.autenticarProfessor(matricula, pin);
+      professor = await Dados.autenticarProfessor(ra, senha);
     } catch (erro) {
       // servidor fora do ar / endereço errado (não é senha errada)
       mensagemErro.textContent = erro.message;
@@ -88,7 +94,9 @@ function showView(id) {
     }
 
     if (!professor) {
-      mensagemErro.textContent = "Matrícula ou PIN inválidos";
+      mensagemErro.textContent = Dados.professoresCarregados()
+        ? "RA não encontrado ou senha incorreta."
+        : "Não foi possível carregar a lista de professores (professores.json).";
       mensagemErro.style.display = "block";
       return;
     }
