@@ -44,6 +44,9 @@ const VIEWS = {
   "painel": {
     guard: () => Sessao.obter()?.tipo === "SECRETARIA",
     guardRedirect: "secretaria-login",
+    // entrada no painel: liga a escuta em tempo real (onSnapshot) e faz
+    // o primeiro desenho do painel (ver window.iniciarPainel)
+    aoEntrar: () => window.iniciarPainel(),
   },
 
   "qrcode": {
@@ -494,6 +497,9 @@ function prepararEntradaAtrasada() {
    ===================================================================== */
 (function () {
   document.getElementById("pn-botao-sair").addEventListener("click", () => {
+    // desliga a escuta em tempo real antes de sair: sem isso o painel
+    // continuaria recebendo snapshots (e tocando alerta) fora da tela
+    window.pararPainel();
     Sessao.encerrar();
     showView("index");
   });
@@ -939,17 +945,58 @@ function prepararEntradaAtrasada() {
     botao.textContent = ok ? "🔔 Notificações ativas" : "Permissão negada";
   });
 
-  // A camada de dados (js/dados.js) dispara estes eventos sempre que o
-  // servidor tiver novidade — inclusive quando o registro foi feito em
-  // OUTRO aparelho (o celular do professor, por exemplo). Como cada
-  // renderização já vai buscar tudo no servidor, quem é avisado só
-  // precisa pedir um novo desenho do painel.
-  Dados.aoMudar(renderizar);
-  Dados.aoMudarEntradasAtrasadas(renderizar);
   // A lista de alunos (GET /alunos) também vem do servidor: quando ela
   // chegar, os cards de "total de alunos" precisam ser recalculados.
   window.addEventListener("alunos:carregados", () => renderizarCards());
-  renderizar();
+
+  /* ---------------------------------------------------------------
+     LIGAR / DESLIGAR O PAINEL
+     ---------------------------------------------------------------
+     Antes a escuta em tempo real e o primeiro desenho aconteciam ao
+     abrir o site, para qualquer visitante. Agora isso só acontece
+     quando a secretaria ENTRA no painel (VIEWS.painel.aoEntrar) e é
+     desligado no botão "Sair". Assim o alerta sonoro e a notificação
+     só tocam para registro NOVO que chegar com o painel aberto: nunca
+     ao abrir, porque o primeiro desenho apenas marca o que já existia.
+     --------------------------------------------------------------- */
+  let cancelarEscutaOcorrencias = null;
+  let cancelarEscutaAtrasos = null;
+
+  window.iniciarPainel = function () {
+    // zera o controle do que "já era conhecido": o primeiro desenho
+    // desta entrada marca tudo o que já existe, sem tocar alerta
+    idsConhecidosOcorrencias = new Set();
+    idsConhecidosAtrasos = new Set();
+    primeiraRenderizacaoOcorrencias = true;
+    primeiraRenderizacaoAtrasos = true;
+
+    // se a escuta já estivesse ligada, desliga antes de religar
+    // (evita dois onSnapshot abertos ao mesmo tempo)
+    if (cancelarEscutaOcorrencias) cancelarEscutaOcorrencias();
+    if (cancelarEscutaAtrasos) cancelarEscutaAtrasos();
+
+    // guarda as duas funções de cancelar (unsubscribe do onSnapshot)
+    cancelarEscutaOcorrencias = Dados.aoMudar(renderizar);
+    cancelarEscutaAtrasos = Dados.aoMudarEntradasAtrasadas(renderizar);
+
+    renderizar();
+  };
+
+  window.pararPainel = function () {
+    if (cancelarEscutaOcorrencias) {
+      cancelarEscutaOcorrencias();
+      cancelarEscutaOcorrencias = null;
+    }
+    if (cancelarEscutaAtrasos) {
+      cancelarEscutaAtrasos();
+      cancelarEscutaAtrasos = null;
+    }
+    // limpa as variáveis de controle para a próxima entrada no painel
+    idsConhecidosOcorrencias = new Set();
+    idsConhecidosAtrasos = new Set();
+    primeiraRenderizacaoOcorrencias = true;
+    primeiraRenderizacaoAtrasos = true;
+  };
 })();
 
 /* =====================================================================

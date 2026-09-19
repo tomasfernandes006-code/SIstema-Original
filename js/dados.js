@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, addDoc, getDocs, doc, updateDoc, query, orderBy
+  collection, addDoc, getDocs, doc, updateDoc, query, orderBy, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
 /* =====================================================================
@@ -647,16 +647,26 @@ const Dados = {
     return { id, status: novoStatus };
   },
 
-  // chama callback toda vez que os dados mudarem — seja nesta aba
-  // (evento customizado) ou em outra aba do MESMO navegador (evento
-  // nativo "storage"). Isso é o que dá a sensação de "tempo real"
-  // sem precisar de servidor - mas repare que só funciona entre
-  // abas do mesmo navegador, não entre aparelhos diferentes.
+  // escuta a coleção "ocorrencias" EM TEMPO REAL (onSnapshot do Firestore):
+  // agora a novidade chega em qualquer aparelho, não só na mesma aba.
+  // O PRIMEIRO snapshot é ignorado de propósito — quem chamou já faz o
+  // primeiro desenho do painel por conta própria, então avisar nesse
+  // instante só tocaria alerta/notificação à toa ao abrir a tela. Do
+  // segundo snapshot em diante, qualquer mudança chama callback().
+  // Devolve a função que cancela a escuta (o unsubscribe do onSnapshot).
   aoMudar(callback) {
-    window.addEventListener("ocorrencias:mudou", callback);
-    window.addEventListener("storage", (e) => {
-      if (e.key === CHAVE_OCORRENCIAS) callback();
-    });
+    let primeiroSnapshot = true;
+    return onSnapshot(
+      collection(db, "ocorrencias"),
+      () => {
+        if (primeiroSnapshot) {
+          primeiroSnapshot = false;
+          return;
+        }
+        callback();
+      },
+      (erro) => console.error('Falha ao escutar em tempo real a coleção "ocorrencias".', erro)
+    );
   },
 
   // grava uma entrada atrasada nova na coleção "atrasos" do Firestore
@@ -691,12 +701,21 @@ const Dados = {
     return { id, status: novoStatus };
   },
 
-  // igual ao aoMudar acima, mas pra fila de entradas atrasadas
+  // igual ao aoMudar acima, mas pra fila de entradas atrasadas: escuta a
+  // coleção "atrasos" em tempo real, ignorando o primeiro snapshot
   aoMudarEntradasAtrasadas(callback) {
-    window.addEventListener("entradas-atrasadas:mudou", callback);
-    window.addEventListener("storage", (e) => {
-      if (e.key === CHAVE_ENTRADAS_ATRASADAS) callback();
-    });
+    let primeiroSnapshot = true;
+    return onSnapshot(
+      collection(db, "atrasos"),
+      () => {
+        if (primeiroSnapshot) {
+          primeiroSnapshot = false;
+          return;
+        }
+        callback();
+      },
+      (erro) => console.error('Falha ao escutar em tempo real a coleção "atrasos".', erro)
+    );
   },
 };
 
