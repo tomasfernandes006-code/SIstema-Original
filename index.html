@@ -93,20 +93,17 @@
         <form id="pl-form-login">
           <div class="campo">
             <label class="rotulo" for="pl-ra">RA</label>
-            <input type="text" id="pl-ra" class="grande mono" inputmode="numeric" placeholder="000000" />
+            <input type="text" id="pl-ra" class="grande mono" inputmode="numeric" placeholder="000000" autocomplete="off" />
           </div>
 
           <div class="campo">
             <label class="rotulo" for="pl-senha">Senha</label>
-            <input type="password" id="pl-senha" class="grande" placeholder="••••••" />
+            <input type="password" id="pl-senha" class="grande" placeholder="••••••" autocomplete="new-password" />
           </div>
 
           <button type="submit" class="botao">Entrar</button>
         </form>
 
-        <p class="subtitulo" style="margin-top:24px; font-family:'IBM Plex Mono', monospace; font-size:12px;">
-          Teste: RA 1001 · senha Professor2026@
-        </p>
       </div>
     </div>
   </div>
@@ -132,12 +129,12 @@
         <form id="al-form-login">
           <div class="campo">
             <label class="rotulo" for="al-ra">RA</label>
-            <input type="text" id="al-ra" class="grande mono" inputmode="numeric" placeholder="000000" />
+            <input type="text" id="al-ra" class="grande mono" inputmode="numeric" placeholder="000000" autocomplete="off" />
           </div>
 
           <div class="campo">
             <label class="rotulo" for="al-senha">Senha</label>
-            <input type="password" id="al-senha" class="grande" placeholder="••••••" />
+            <input type="password" id="al-senha" class="grande" placeholder="••••••" autocomplete="new-password" />
           </div>
 
           <button type="submit" class="botao">Entrar</button>
@@ -147,9 +144,6 @@
           <a href="#" class="link-voltar" onclick="showView('aluno-trocar-senha'); return false;">Trocar senha</a>
         </p>
 
-        <p class="subtitulo" style="margin-top:24px; font-family:'IBM Plex Mono', monospace; font-size:12px;">
-          Teste: RA 2001
-        </p>
       </div>
     </div>
   </div>
@@ -179,22 +173,22 @@
         <form id="ats-form-trocar-senha">
           <div class="campo">
             <label class="rotulo" for="ats-ra">RA</label>
-            <input type="text" id="ats-ra" class="grande mono" inputmode="numeric" placeholder="000000" />
+            <input type="text" id="ats-ra" class="grande mono" inputmode="numeric" placeholder="000000" autocomplete="off" />
           </div>
 
           <div class="campo">
             <label class="rotulo" for="ats-senha-atual">Senha atual</label>
-            <input type="password" id="ats-senha-atual" class="grande" placeholder="••••••" />
+            <input type="password" id="ats-senha-atual" class="grande" placeholder="••••••" autocomplete="new-password" />
           </div>
 
           <div class="campo">
             <label class="rotulo" for="ats-nova-senha">Nova senha</label>
-            <input type="password" id="ats-nova-senha" class="grande" placeholder="••••••" />
+            <input type="password" id="ats-nova-senha" class="grande" placeholder="••••••" autocomplete="new-password" />
           </div>
 
           <div class="campo">
             <label class="rotulo" for="ats-confirmar-senha">Confirmar nova senha</label>
-            <input type="password" id="ats-confirmar-senha" class="grande" placeholder="••••••" />
+            <input type="password" id="ats-confirmar-senha" class="grande" placeholder="••••••" autocomplete="new-password" />
           </div>
 
           <button type="submit" class="botao">Trocar senha</button>
@@ -228,20 +222,17 @@
         <form id="sl-form-login">
           <div class="campo">
             <label class="rotulo" for="sl-usuario">Usuário</label>
-            <input type="text" id="sl-usuario" placeholder="secretaria" />
+            <input type="text" id="sl-usuario" placeholder="secretaria" autocomplete="off" />
           </div>
 
           <div class="campo">
             <label class="rotulo" for="sl-senha">Senha</label>
-            <input type="password" id="sl-senha" placeholder="••••••" />
+            <input type="password" id="sl-senha" placeholder="••••••" autocomplete="new-password" />
           </div>
 
           <button type="submit" class="botao botao-escuro">Entrar</button>
         </form>
 
-        <p class="subtitulo" style="margin-top:24px; font-family:'IBM Plex Mono', monospace; font-size:12px;">
-          Teste: usuário "secretaria" · senha 1234
-        </p>
       </div>
     </div>
   </div>

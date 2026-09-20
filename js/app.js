@@ -19,15 +19,15 @@
 
 const VIEWS = {
   "index": {},
-  "professor-login": {},
-  "aluno-login": {},
+  "professor-login": { aoEntrar: () => limparTela("professor-login") },
+  "aluno-login": { aoEntrar: () => limparTela("aluno-login") },
 
   // troca de senha do aluno: não tem "guard" porque não depende de
   // sessão — o próprio formulário pede o RA e a senha atual, que são
   // conferidos no servidor por Dados.trocarSenhaAluno
-  "aluno-trocar-senha": {},
+  "aluno-trocar-senha": { aoEntrar: () => limparTela("aluno-trocar-senha") },
 
-  "secretaria-login": {},
+  "secretaria-login": { aoEntrar: () => limparTela("secretaria-login") },
 
   // só entra aqui se Sessao.obter().tipo === "PROFESSOR";
   // caso contrário, é mandado para a tela de login do professor
@@ -84,6 +84,17 @@ function atualizarUrl(view, sub, substituir) {
   } catch {
     // ambiente que bloqueia a History API: a tela troca normalmente, só a URL não acompanha
   }
+}
+
+// Esvazia uma tela de login: RA/usuário, senhas e mensagens de erro/sucesso.
+// Roda toda vez que a tela é aberta, assim quem usa o computador depois
+// nunca vê o que o usuário anterior digitou.
+function limparTela(id) {
+  const tela = document.getElementById("view-" + id);
+  tela.querySelectorAll("input").forEach((campo) => (campo.value = ""));
+  tela
+    .querySelectorAll('[id$="-mensagem-erro"], [id$="-mensagem-sucesso"]')
+    .forEach((msg) => (msg.style.display = "none"));
 }
 
 // historico: "push" (padrão), "replace" ou "nenhum" (a URL já está certa, ex.: botão voltar)
@@ -544,6 +555,10 @@ function prepararEntradaAtrasada() {
   const campoTurmaAtraso = document.getElementById("atr-turma");
   campoTurmaAtraso.value = sessao.sala || sessao.turma || "";
   campoTurmaAtraso.readOnly = true;
+  // começa sempre em branco: nada do aluno anterior pode sobrar
+  document.getElementById("atr-motivo").value = "";
+  document.getElementById("atr-mensagem-erro").style.display = "none";
+  document.getElementById("atr-mensagem-sucesso").style.display = "none";
 }
 
 (function () {
@@ -594,8 +609,10 @@ function prepararEntradaAtrasada() {
     document.getElementById("atr-turma").value = sessao.sala || sessao.turma || "";
 
     mensagemSucesso.style.display = "block";
-    setTimeout(() => (mensagemSucesso.style.display = "none"), 3000);
-    document.getElementById("atr-motivo").focus();
+    setTimeout(() => {
+      Sessao.encerrar();
+      showView("index");
+    }, 3000);
   });
 })();
 
