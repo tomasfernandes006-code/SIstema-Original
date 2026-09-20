@@ -52,7 +52,10 @@ const VIEWS = {
     guardRedirect: "secretaria-login",
     // entrada no painel: liga a escuta em tempo real (onSnapshot) e faz
     // o primeiro desenho do painel (ver window.iniciarPainel)
-    aoEntrar: () => window.iniciarPainel(),
+    aoEntrar: (sub) => {
+      window.iniciarPainel();
+      window.alternarPainel(sub);
+    },
   },
 
   "qrcode": {
@@ -60,16 +63,52 @@ const VIEWS = {
   },
 };
 
-function showView(id) {
-  const cfg = VIEWS[id];
+// A tela atual fica guardada no hash da URL (ex.: #/painel/atrasos),
+// assim o F5 e o botão voltar do navegador funcionam.
+const PAINEIS = ["dashboard", "ocorrencias", "atrasos"];
+let viewAtual = null;
+
+function lerUrl() {
+  const [view, sub] = location.hash.replace(/^#\/?/, "").split("/");
+  return {
+    view: Object.prototype.hasOwnProperty.call(VIEWS, view) ? view : "index",
+    sub: sub || null,
+  };
+}
+
+function atualizarUrl(view, sub, substituir) {
+  const hash = view === "index" ? "" : "#/" + view + (sub ? "/" + sub : "");
+  if (location.hash === hash) return;
+  try {
+    history[substituir ? "replaceState" : "pushState"](null, "", location.pathname + location.search + hash);
+  } catch {
+    // ambiente que bloqueia a History API: a tela troca normalmente, só a URL não acompanha
+  }
+}
+
+// historico: "push" (padrão), "replace" ou "nenhum" (a URL já está certa, ex.: botão voltar)
+function showView(id, { sub = null, historico = "push" } = {}) {
+  let cfg = VIEWS[id];
   if (cfg && cfg.guard && !cfg.guard()) {
     id = cfg.guardRedirect;
+    cfg = VIEWS[id];
+    sub = null;
+    if (historico === "nenhum") historico = "replace";
   }
+
+  // saiu do painel por qualquer caminho (inclusive botão voltar): desliga a escuta em tempo real
+  if (viewAtual === "painel" && id !== "painel" && window.pararPainel) window.pararPainel();
+
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("ativo"));
   document.getElementById("view-" + id).classList.add("ativo");
   window.scrollTo(0, 0);
-  const cfgFinal = VIEWS[id];
-  if (cfgFinal && cfgFinal.aoEntrar) cfgFinal.aoEntrar();
+  viewAtual = id;
+
+  if (id !== "painel") sub = null;
+  else if (!PAINEIS.includes(sub)) sub = "dashboard";
+
+  if (historico !== "nenhum") atualizarUrl(id, sub, historico === "replace");
+  if (cfg && cfg.aoEntrar) cfg.aoEntrar(sub);
 }
 
 /* =====================================================================
@@ -670,8 +709,14 @@ function prepararEntradaAtrasada() {
     document.getElementById("pn-secao-atrasos").style.display = nome === "atrasos" ? "" : "none";
   }
 
+  window.alternarPainel = alternarPainel;
+
   document.querySelectorAll(".sidebar-item[data-painel]").forEach((botao) => {
-    botao.addEventListener("click", () => alternarPainel(botao.dataset.painel));
+    botao.addEventListener("click", () => {
+      alternarPainel(botao.dataset.painel);
+      // troca de seção não cria entrada no "voltar", só atualiza a URL
+      atualizarUrl("painel", botao.dataset.painel, true);
+    });
   });
 
   /* ---------------------------------------------------------------
@@ -1122,3 +1167,15 @@ function gerarQrCode() {
 // chamadas direto pelo HTML (onclick="...") precisam ficar globais,
 // como eram quando o arquivo era um script clássico.
 window.showView = showView;
+
+// F5 / link direto: abre a tela indicada na URL (ou o portal, se não houver)
+(function iniciarRoteador() {
+  const { view, sub } = lerUrl();
+  showView(view, { sub, historico: "replace" });
+
+  // botão voltar / avançar do navegador
+  window.addEventListener("popstate", () => {
+    const { view, sub } = lerUrl();
+    showView(view, { sub, historico: "nenhum" });
+  });
+})();
