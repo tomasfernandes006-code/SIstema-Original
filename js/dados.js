@@ -470,6 +470,26 @@ function garantirProfessoresCarregados() {
   return promessaProfessores;
 }
 
+// A contagem recomeça TODA SEGUNDA-FEIRA: ocorrências e entradas atrasadas
+// só valem para a semana atual (de segunda 00:00 até agora). Registros de
+// semanas anteriores não são mais lidos, então somem do painel e dos
+// relatórios (continuam gravados no Firebase, só ficam escondidos).
+
+// segunda-feira desta semana, às 00:00 (horário do computador)
+function inicioDaSemana(referencia = new Date()) {
+  const inicio = new Date(referencia);
+  inicio.setHours(0, 0, 0, 0);
+  const diasDesdeSegunda = (inicio.getDay() + 6) % 7; // segunda = 0 ... domingo = 6
+  inicio.setDate(inicio.getDate() - diasDesdeSegunda);
+  return inicio;
+}
+
+// data-limite em ISO (mesmo formato do campo "criadaEm"): tudo que foi
+// criado antes disso é de uma semana anterior
+function limiteDeRetencaoISO() {
+  return inicioDaSemana().toISOString();
+}
+
 // lê a coleção "ocorrencias" no Firestore, da mais recente para a mais antiga
 // (orderBy "criadaEm" desc: a ocorrência nova aparece em cima na tela).
 // Cada documento vira { id: <id do documento>, ...campos gravados } — esse
@@ -501,6 +521,8 @@ function avisarMudancaEntradasAtrasadas() {
 }
 
 const Dados = {
+  inicioDaSemana,
+
   /* ---------------------------------------------------------------
      PROFESSORES — tudo vem do professores.json
      (ver carregarProfessoresDoArquivo). O professor entra com o RA
@@ -746,7 +768,9 @@ const Dados = {
   },
 
   async listarOcorrencias({ apenasAbertas } = {}) {
-    const lista = await lerOcorrencias();
+    const limite = limiteDeRetencaoISO();
+    // só a semana atual: o que foi criado antes da segunda 00:00 fica de fora
+    const lista = (await lerOcorrencias()).filter((o) => (o.criadaEm || "") >= limite);
     if (!apenasAbertas) return lista;
     return lista.filter((o) => o.status !== "RESOLVIDA");
   },
@@ -801,7 +825,9 @@ const Dados = {
   },
 
   async listarEntradasAtrasadas({ apenasAbertas } = {}) {
-    const lista = await lerEntradasAtrasadas();
+    const limite = limiteDeRetencaoISO();
+    // só a semana atual: o que foi criado antes da segunda 00:00 fica de fora
+    const lista = (await lerEntradasAtrasadas()).filter((e) => (e.criadaEm || "") >= limite);
     if (!apenasAbertas) return lista;
     return lista.filter((e) => e.status !== "RESOLVIDA");
   },

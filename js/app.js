@@ -761,25 +761,27 @@ function prepararEntradaAtrasada() {
   }
 
   /* ---------------------------------------------------------------
-     DASHBOARD — GRÁFICO DE OCORRÊNCIAS (ÚLTIMOS 7 DIAS)
+     DASHBOARD — GRÁFICO DE OCORRÊNCIAS (SEMANA ATUAL: SEGUNDA A DOMINGO)
      ================================================================
-     Mesma estrutura visual do gráfico "Entradas atrasadas · últimos 7
-     dias" (barras), mas usando como fonte os registros de ocorrências:
-     conta quantas ocorrências foram registradas em cada um dos últimos
-     7 dias. Os números mudam automaticamente quando uma nova ocorrência
-     é registrada (renderizar() é chamado pelo evento "ocorrencias:mudou"
+     Mesma estrutura visual do gráfico "Entradas atrasadas · semana
+     atual (segunda a domingo)" (barras), mas usando como fonte os
+     registros de ocorrências: conta quantas ocorrências foram
+     registradas em cada dia da semana atual (segunda a domingo). Os
+     números mudam automaticamente quando uma nova ocorrência é
+     registrada (renderizar() é chamado pelo evento "ocorrencias:mudou"
      e pelos botões de status da listagem).
      --------------------------------------------------------------- */
   function renderizarGraficoTipos() {
     const container = document.getElementById("pn-grafico-tipos");
     const ocorrencias = ocorrenciasDoPainel;
 
-    const dias = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      dias.push(d);
-    }
+    // 7 barras fixas: segunda a domingo da semana atual
+    const segunda = Dados.inicioDaSemana();
+    const dias = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(segunda);
+      d.setDate(segunda.getDate() + i);
+      return d;
+    });
 
     const contagem = dias.map((dia) => ({
       dia,
@@ -799,18 +801,19 @@ function prepararEntradaAtrasada() {
   }
 
   /* ---------------------------------------------------------------
-     DASHBOARD — GRÁFICO DE ENTRADAS ATRASADAS (ÚLTIMOS 7 DIAS)
+     DASHBOARD — GRÁFICO DE ENTRADAS ATRASADAS (SEMANA ATUAL: SEGUNDA A DOMINGO)
      --------------------------------------------------------------- */
   function renderizarGraficoAtrasos() {
     const container = document.getElementById("pn-grafico-atrasos");
     const atrasos = atrasosDoPainel;
 
-    const dias = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      dias.push(d);
-    }
+    // 7 barras fixas: segunda a domingo da semana atual
+    const segunda = Dados.inicioDaSemana();
+    const dias = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(segunda);
+      d.setDate(segunda.getDate() + i);
+      return d;
+    });
 
     const contagem = dias.map((dia) => ({
       dia,
