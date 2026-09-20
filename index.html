@@ -143,8 +143,65 @@
           <button type="submit" class="botao">Entrar</button>
         </form>
 
+        <p style="text-align:center; margin-top:20px;">
+          <a href="#" class="link-voltar" onclick="showView('aluno-trocar-senha'); return false;">Trocar senha</a>
+        </p>
+
         <p class="subtitulo" style="margin-top:24px; font-family:'IBM Plex Mono', monospace; font-size:12px;">
           Teste: RA 2001
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       TELA 3B — TROCAR SENHA DO ALUNO
+       Chega aqui pelo link "Trocar senha" da tela de login do aluno
+       (não é protegida: exige o RA + a senha atual do aluno)
+       ========================================================= -->
+  <div id="view-aluno-trocar-senha" class="view tela">
+    <div class="container">
+      <a href="#" class="link-voltar" onclick="showView('aluno-login'); return false;">← voltar</a>
+
+      <div class="folha" style="margin-top:16px;">
+        <div class="marca-icone" style="margin:0 auto 20px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg>
+        </div>
+        <p class="eyebrow">Acesso do aluno</p>
+        <h1 class="titulo-grande" style="font-size:40px;">Trocar senha</h1>
+        <p class="subtitulo">Informe o seu RA, a senha atual e a nova senha</p>
+
+        <div class="sucesso" id="ats-mensagem-sucesso" style="display:none;">
+          ✓ Senha alterada com sucesso
+        </div>
+        <p class="erro" id="ats-mensagem-erro" style="display:none;"></p>
+
+        <form id="ats-form-trocar-senha">
+          <div class="campo">
+            <label class="rotulo" for="ats-ra">RA</label>
+            <input type="text" id="ats-ra" class="grande mono" inputmode="numeric" placeholder="000000" />
+          </div>
+
+          <div class="campo">
+            <label class="rotulo" for="ats-senha-atual">Senha atual</label>
+            <input type="password" id="ats-senha-atual" class="grande" placeholder="••••••" />
+          </div>
+
+          <div class="campo">
+            <label class="rotulo" for="ats-nova-senha">Nova senha</label>
+            <input type="password" id="ats-nova-senha" class="grande" placeholder="••••••" />
+          </div>
+
+          <div class="campo">
+            <label class="rotulo" for="ats-confirmar-senha">Confirmar nova senha</label>
+            <input type="password" id="ats-confirmar-senha" class="grande" placeholder="••••••" />
+          </div>
+
+          <button type="submit" class="botao">Trocar senha</button>
+        </form>
+
+        <p style="text-align:center; margin-top:20px;">
+          <a href="#" class="link-voltar" onclick="showView('aluno-login'); return false;">← voltar para o login</a>
         </p>
       </div>
     </div>

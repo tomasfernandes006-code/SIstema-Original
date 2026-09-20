@@ -21,6 +21,12 @@ const VIEWS = {
   "index": {},
   "professor-login": {},
   "aluno-login": {},
+
+  // troca de senha do aluno: não tem "guard" porque não depende de
+  // sessão — o próprio formulário pede o RA e a senha atual, que são
+  // conferidos no servidor por Dados.trocarSenhaAluno
+  "aluno-trocar-senha": {},
+
   "secretaria-login": {},
 
   // só entra aqui se Sessao.obter().tipo === "PROFESSOR";
@@ -159,6 +165,70 @@ function showView(id) {
     // só depois de logar como aluno é que a tela de entrada
     // atrasada é liberada (ver "guard" em VIEWS acima)
     showView("entrada-atrasada");
+  });
+})();
+
+/* =====================================================================
+   TELA: TROCAR SENHA DO ALUNO (ver view "aluno-trocar-senha")
+   Chega aqui pelo link "Trocar senha" da tela de login do aluno.
+   A conferência da senha atual e a gravação da nova senha acontecem no
+   servidor: é o Dados.trocarSenhaAluno que confere o RA + a senha atual
+   e grava o hash da nova senha em senhasAlunos/{RA} (Firestore).
+   ===================================================================== */
+(function () {
+  const form = document.getElementById("ats-form-trocar-senha");
+  const mensagemErro = document.getElementById("ats-mensagem-erro");
+  const mensagemSucesso = document.getElementById("ats-mensagem-sucesso");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    // esconde o que sobrou da tentativa anterior
+    mensagemErro.style.display = "none";
+    mensagemSucesso.style.display = "none";
+
+    const ra = document.getElementById("ats-ra").value.trim();
+    const senhaAtual = document.getElementById("ats-senha-atual").value;
+    const novaSenha = document.getElementById("ats-nova-senha").value;
+    const confirmar = document.getElementById("ats-confirmar-senha").value;
+
+    // ---- 1) conferências que dá pra fazer aqui na tela ----
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!novaSenha) {
+      mensagemErro.textContent = "Informe a nova senha";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // as duas senhas novas precisam ser iguais
+    if (novaSenha !== confirmar) {
+      mensagemErro.textContent = "A nova senha e a confirmação não são iguais";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 2) confere a senha atual e grava a nova no servidor ----
+    // (se a senha atual estiver errada ou o RA não existir, o erro é
+    // "senha atual incorreta" — ver Dados.trocarSenhaAluno)
+    try {
+      await Dados.trocarSenhaAluno(ra, senhaAtual, novaSenha);
+    } catch (erro) {
+      mensagemErro.textContent = /senha atual incorreta/i.test(erro.message)
+        ? "Senha atual incorreta. Confira o RA e a senha digitada."
+        : erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 3) deu certo: limpa o formulário e avisa ----
+    form.reset();
+    mensagemSucesso.style.display = "block";
+    setTimeout(() => (mensagemSucesso.style.display = "none"), 4000);
   });
 })();
 

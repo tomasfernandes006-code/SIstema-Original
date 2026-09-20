@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, addDoc, getDocs, doc, updateDoc, query, orderBy, onSnapshot
+  collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, query, orderBy, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
 /* =====================================================================
@@ -58,8 +58,11 @@ const USUARIOS = [
    --------------------------------------------------------------------- */
 const ARQUIVO_ALUNOS = "alunos.json";
 
-// senha fixa de TODOS os alunos (a mesma para todos; o login do aluno
-// exige o RA existente no alunos.json + esta senha exata)
+// senha PADRÃO dos alunos (a mesma para todos). O login do aluno exige o
+// RA existente no alunos.json + a senha correta: alunos que têm senha
+// própria cadastrada na coleção "senhasAlunos" do Firestore (campo
+// "senhaHash") são conferidos pelo hash, e só quem NÃO tem documento lá
+// é que usa esta senha padrão exata (ver autenticarAluno).
 const SENHA_ALUNOS = "@Coronel2026";
 
 let ALUNOS = [];              // lista já validada, vinda do alunos.json
@@ -105,6 +108,27 @@ let promessaProfessores = null;    // controla a leitura (evita ler o arquivo 2x
 function comoTexto(valor) {
   if (valor === null || valor === undefined) return "";
   return String(valor).trim();
+}
+
+// calcula o hash SHA-256 de um texto e devolve em hexadecimal minúsculo
+// (ex.: 64 caracteres). É exatamente o formato esperado no campo
+// "senhaHash" dos documentos da coleção "senhasAlunos" do Firestore.
+// Usa a Web Crypto API do navegador (crypto.subtle.digest), que só existe
+// em contexto seguro (https:// ou localhost) — em file:// a chamada não
+// tem como funcionar e o erro abaixo explica o motivo.
+async function gerarHashSha256(texto) {
+  const webCrypto = globalThis.crypto;
+  if (!webCrypto || !webCrypto.subtle) {
+    throw new Error(
+      "Não foi possível calcular o hash da senha (crypto.subtle indisponível). " +
+        "Abra o sistema por https:// ou por localhost."
+    );
+  }
+  const bytes = new TextEncoder().encode(String(texto));
+  const digest = await webCrypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // aplica as validações em cada aluno lido do arquivo:
@@ -537,22 +561,110 @@ const Dados = {
 
   /* ---------------------------------------------------------------
      ALUNOS — tudo vem do alunos.json (ver carregarAlunosDoArquivo)
-     O acesso do aluno é feito pelo RA + senha fixa: o RA precisa
-     existir no alunos.json e a senha precisa ser exatamente
-     "@Coronel2026" (SENHA_ALUNOS, no topo deste arquivo). Nome, sala
-     e turno são identificados automaticamente a partir do alunos.json.
+     O acesso do aluno é feito pelo RA + senha: o RA precisa existir
+     no alunos.json e a senha precisa bater. Nome, sala e turno são
+     identificados automaticamente a partir do alunos.json.
+     A senha conferida é:
+       - o campo "senhaHash" (SHA-256) do documento de ID = RA na
+         coleção "senhasAlunos" do Firestore, QUANDO esse documento
+         existe (senha própria do aluno — a senha padrão não vale); ou
+       - a senha padrão "@Coronel2026" (SENHA_ALUNOS, no topo deste
+         arquivo), quando não existe documento para o RA.
      RA inexistente ou senha errada = login negado.
      --------------------------------------------------------------- */
   async autenticarAluno(ra, senha) {
     const raDigitado = comoTexto(ra);
     if (!raDigitado) return null;
-    // senha precisa ser EXATAMENTE igual (sem cortar espaços): "@Coronel2026"
-    if (String(senha ?? "") !== SENHA_ALUNOS) return null;
+    // a senha digitada é usada EXATAMENTE como veio, sem cortar espaços
+    // (nem no hash, nem na comparação com a senha padrão SENHA_ALUNOS)
+    const senhaDigitada = String(senha ?? "");
+
+    // Senha própria do aluno: existe um documento por RA na coleção
+    // "senhasAlunos" do Firestore (ID do documento = RA). Se esse documento
+    // existir, a senha digitada é conferida contra o campo "senhaHash" dele
+    // (SHA-256) em vez da senha padrão; se não existir, vale a comparação
+    // original com SENHA_ALUNOS. Se a consulta ao Firestore falhar (sem
+    // rede, regras de acesso etc.), o aviso vai para o console e o login
+    // segue usando a senha padrão, pra não derrubar o acesso de todos.
+    let documentoDeSenha = null;
+    try {
+      const documento = await getDoc(doc(db, "senhasAlunos", raDigitado));
+      if (documento.exists()) documentoDeSenha = documento.data() || {};
+    } catch (erro) {
+      console.warn(
+        `Não foi possível consultar a senha própria do aluno (RA ${raDigitado}) ` +
+          `na coleção "senhasAlunos"; usando a senha padrão SENHA_ALUNOS.`,
+        erro
+      );
+    }
+
+    if (documentoDeSenha) {
+      // o aluno tem senha própria: só entra com a senha que gera o hash
+      // gravado em "senhaHash" (a senha padrão NÃO é aceita nesse caso)
+      const senhaHash = comoTexto(documentoDeSenha.senhaHash).toLowerCase();
+      if (!senhaHash) return null; // documento sem "senhaHash": login negado
+      const hashDigitado = await gerarHashSha256(senhaDigitada);
+      if (hashDigitado !== senhaHash) return null;
+    } else if (senhaDigitada !== SENHA_ALUNOS) {
+      return null;
+    }
 
     await garantirAlunosCarregados();
 
     const aluno = ALUNOS.find((a) => a.ra === raDigitado);
     return aluno ? { ...aluno } : null;
+  },
+
+  /* ---------------------------------------------------------------
+     TROCA DE SENHA DO ALUNO
+     Confere a senha atual com autenticarAluno e, se estiver certa,
+     grava o SHA-256 da nova senha em senhasAlunos/{RA}.senhaHash —
+     o mesmo formato que o login lê (ver autenticarAluno). Enquanto
+     a gravação não dá certo, a senha antiga continua valendo.
+       - senha atual errada ou RA inválido -> lança
+         Error("senha atual incorreta")
+       - falha técnica (Firestore fora do ar, crypto.subtle
+         indisponível etc.) -> sobe Error com contexto, para a tela
+         mostrar o problema real (não é "senha atual incorreta")
+       - sucesso -> devolve { ra, senhaAlterada: true }
+     --------------------------------------------------------------- */
+  async trocarSenhaAluno(ra, senhaAtual, novaSenha) {
+    const raDigitado = comoTexto(ra);
+
+    // 1) valida a senha atual com as MESMAS regras do login
+    let aluno;
+    try {
+      aluno = await Dados.autenticarAluno(raDigitado, senhaAtual);
+    } catch (erro) {
+      // não é senha errada: deu problema na própria conferência
+      throw new Error(
+        `Não foi possível conferir a senha atual do aluno (RA ${
+          raDigitado || "não informado"
+        }): ${erro.message}`,
+        { cause: erro }
+      );
+    }
+
+    if (!aluno) {
+      // RA inexistente ou senha atual incorreta
+      throw new Error("senha atual incorreta");
+    }
+
+    // 2) grava a nova senha: só o campo "senhaHash" no documento
+    // senhasAlunos/{RA}. O merge: true preserva outros campos que o
+    // documento já tenha, e o setDoc cria o documento quando ele ainda
+    // não existe (aluno que até então usava a senha padrão).
+    const senhaHash = await gerarHashSha256(String(novaSenha ?? ""));
+    try {
+      await setDoc(doc(db, "senhasAlunos", raDigitado), { senhaHash }, { merge: true });
+    } catch (erro) {
+      throw new Error(
+        `Não foi possível salvar a nova senha do aluno (RA ${raDigitado}) no Firestore: ${erro.message}`,
+        { cause: erro }
+      );
+    }
+
+    return { ra: raDigitado, senhaAlterada: true };
   },
 
   // força uma nova leitura do alunos.json (a lista é lida sozinha na
