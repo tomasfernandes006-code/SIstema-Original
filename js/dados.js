@@ -801,7 +801,7 @@ const Dados = {
   aoMudar(callback) {
     let primeiroSnapshot = true;
     return onSnapshot(
-      collection(db, "ocorrencias"),
+      query(collection(db, "ocorrencias"), where("criadaEm", ">=", limiteDeRetencaoISO())),
       () => {
         if (primeiroSnapshot) {
           primeiroSnapshot = false;
@@ -852,7 +852,7 @@ const Dados = {
   aoMudarEntradasAtrasadas(callback) {
     let primeiroSnapshot = true;
     return onSnapshot(
-      collection(db, "atrasos"),
+      query(collection(db, "atrasos"), where("criadaEm", ">=", limiteDeRetencaoISO())),
       () => {
         if (primeiroSnapshot) {
           primeiroSnapshot = false;
