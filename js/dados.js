@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, query, orderBy, onSnapshot
+  collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, query, orderBy, onSnapshot, where
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
 /* =====================================================================
@@ -496,7 +496,11 @@ function limiteDeRetencaoISO() {
 // "id" é o que os botões de status usam para achar o documento no updateDoc.
 async function lerOcorrencias() {
   const resultado = await getDocs(
-    query(collection(db, "ocorrencias"), orderBy("criadaEm", "desc"))
+    query(
+      collection(db, "ocorrencias"),
+      where("criadaEm", ">=", limiteDeRetencaoISO()),
+      orderBy("criadaEm", "desc")
+    )
   );
   return resultado.docs.map((documento) => ({ ...documento.data(), id: documento.id }));
 }
@@ -510,7 +514,11 @@ function avisarMudancaOcorrencias() {
 // mesma coisa da coleção "ocorrencias", agora para a coleção "atrasos"
 async function lerEntradasAtrasadas() {
   const resultado = await getDocs(
-    query(collection(db, "atrasos"), orderBy("criadaEm", "desc"))
+    query(
+      collection(db, "atrasos"),
+      where("criadaEm", ">=", limiteDeRetencaoISO()),
+      orderBy("criadaEm", "desc")
+    )
   );
   return resultado.docs.map((documento) => ({ ...documento.data(), id: documento.id }));
 }
