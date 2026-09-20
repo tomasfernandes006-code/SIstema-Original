@@ -8,6 +8,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/estilo.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
 </head>
 <body>
 
@@ -514,6 +517,8 @@
               <p class="eyebrow" style="text-align:left; margin-bottom:0;">Painel da secretaria</p>
               <h1 class="titulo-grande" style="text-align:left; font-size:32px;">Ocorrências</h1>
             </div>
+            <button type="button" id="pn-imprimir-ocorrencias" class="botao-mini botao-mini-escura">Imprimir ocorrências (PDF)</button>
+
           </div>
           <div class="filtros">
             <button class="filtro-btn ativo" data-filtro="abertas">Em aberto</button>
@@ -527,6 +532,8 @@
           <div class="topo-painel">
             <div>
               <p class="eyebrow" style="text-align:left; margin-bottom:0;">Painel da secretaria</p>
+            <button type="button" id="pn-imprimir-atrasos" class="botao-mini botao-mini-escura">Imprimir entradas atrasadas (PDF)</button>
+
               <h1 class="titulo-grande" style="text-align:left; font-size:32px;">Entradas atrasadas</h1>
             </div>
           </div>
@@ -562,6 +569,8 @@
       <button onclick="window.print()" class="botao botao-escuro no-print" style="margin-top:24px;">Imprimir</button>
     </div>
   </div>
+
+  <script src="js/relatorios.js"></script>
 
   <!-- Arquivos complementares: precisam estar nesta ordem, cada um
        depende dos anteriores (dados/sessão/notificações são usados
