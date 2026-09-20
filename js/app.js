@@ -670,9 +670,12 @@ function prepararEntradaAtrasada() {
   }
 
   function escapar(texto) {
-    const div = document.createElement("div");
-    div.textContent = texto ?? "";
-    return div.innerHTML;
+    return String(texto ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function ehMesmoDia(iso, dataRef) {
@@ -858,9 +861,9 @@ function prepararEntradaAtrasada() {
           ${ocorrencias.map((o) => `
             <tr>
               <td class="tabela-nome">${escapar(o.alunoNome)}</td>
-              <td><span class="tabela-tipo">${ROTULO_TIPO[o.tipo] || o.tipo}</span></td>
+              <td><span class="tabela-tipo">${escapar(ROTULO_TIPO[o.tipo] || o.tipo)}</span></td>
               <td class="tabela-hora">${formatarDataCurta(o.criadaEm)}</td>
-              <td><span class="tag-status" style="${ESTILO_STATUS[o.status]}">${o.status.replace("_", " ")}</span></td>
+              <td><span class="tag-status" style="${ESTILO_STATUS[o.status] || ""}">${escapar(String(o.status ?? "").replace("_", " "))}</span></td>
             </tr>
           `).join("")}
         </tbody>
@@ -894,7 +897,7 @@ function prepararEntradaAtrasada() {
             <tr>
               <td class="tabela-nome">${escapar(a.alunoNome)}</td>
               <td class="tabela-hora">${formatarDataCurta(a.criadaEm)}</td>
-              <td><span class="tag-status" style="${ESTILO_STATUS[a.status]}">${a.status.replace("_", " ")}</span></td>
+              <td><span class="tag-status" style="${ESTILO_STATUS[a.status] || ""}">${escapar(String(a.status ?? "").replace("_", " "))}</span></td>
             </tr>
           `).join("")}
         </tbody>
@@ -951,18 +954,18 @@ function prepararEntradaAtrasada() {
             <p class="nome-aluno">${escapar(o.alunoNome)}</p>
             <p class="meta-aluno">RA ${escapar(o.alunoRa)}${o.turma ? " · Turma " + escapar(o.turma) : ""}</p>
           </div>
-          <span class="tag-gravidade" style="${ESTILO_GRAVIDADE[o.gravidade]}">${o.gravidade}</span>
+          <span class="tag-gravidade" style="${ESTILO_GRAVIDADE[o.gravidade] || ""}">${escapar(o.gravidade)}</span>
         </div>
 
         <div class="linha-tags">
-          <span class="tag-tipo">${ROTULO_TIPO[o.tipo] || o.tipo}</span>
+          <span class="tag-tipo">${escapar(ROTULO_TIPO[o.tipo] || o.tipo)}</span>
           <span class="tag-hora">${formatarHora(o.criadaEm)} · prof(a). ${escapar(o.professorNome)}</span>
         </div>
 
         ${o.detalhes ? `<p class="detalhes-ocorrencia">${escapar(o.detalhes)}</p>` : ""}
 
         <div class="linha-acoes">
-          <span class="tag-status" style="${ESTILO_STATUS[o.status]}">${o.status.replace("_", " ")}</span>
+          <span class="tag-status" style="${ESTILO_STATUS[o.status] || ""}">${escapar(String(o.status ?? "").replace("_", " "))}</span>
           <div class="acoes-direita">
             ${o.status === "NOVA" ? `<button class="botao-mini botao-mini-clara" onclick="mudarStatusOcorrencia('${o.id}', 'LIDA')">Marcar como vista</button>` : ""}
             ${o.status !== "RESOLVIDA" ? `<button class="botao-mini botao-mini-escura" onclick="mudarStatusOcorrencia('${o.id}', 'RESOLVIDA')">Marcar como resolvida</button>` : ""}
@@ -1023,7 +1026,7 @@ function prepararEntradaAtrasada() {
         <p class="detalhes-ocorrencia">${escapar(ent.motivo)}</p>
 
         <div class="linha-acoes">
-          <span class="tag-status" style="${ESTILO_STATUS[ent.status]}">${ent.status.replace("_", " ")}</span>
+          <span class="tag-status" style="${ESTILO_STATUS[ent.status] || ""}">${escapar(String(ent.status ?? "").replace("_", " "))}</span>
           <div class="acoes-direita">
             ${ent.status === "NOVA" ? `<button class="botao-mini botao-mini-clara" onclick="mudarStatusAtraso('${ent.id}', 'LIDA')">Marcar como vista</button>` : ""}
             ${ent.status !== "RESOLVIDA" ? `<button class="botao-mini botao-mini-escura" onclick="mudarStatusAtraso('${ent.id}', 'RESOLVIDA')">Marcar como resolvida</button>` : ""}
