@@ -95,8 +95,11 @@ let promessaAlunos = null;    // controla a leitura (evita ler o arquivo 2x)
    --------------------------------------------------------------------- */
 const ARQUIVO_PROFESSORES = "professores.json";
 
-// senha fixa de TODOS os professores (a mesma para todos; o login exige
-// o RA existente no professores.json + esta senha exata)
+// senha PADRÃO dos professores (a mesma para todos). O login do professor
+// exige o RA existente no professores.json + a senha correta: professores
+// que têm senha própria cadastrada na coleção "senhasProfessores" do
+// Firestore (campo "senhaHash") são conferidos pelo hash, e só quem NÃO tem
+// documento lá é que usa esta senha padrão exata (ver autenticarProfessor).
 const SENHA_PROFESSORES = "Professor2026@";
 
 let PROFESSORES = [];              // lista já validada, vinda do professores.json
@@ -534,11 +537,16 @@ const Dados = {
   /* ---------------------------------------------------------------
      PROFESSORES — tudo vem do professores.json
      (ver carregarProfessoresDoArquivo). O professor entra com o RA
-     (identificador único) e a senha fixa: o RA precisa existir no
-     professores.json e a senha precisa ser exatamente "Professor2026@"
-     (SENHA_PROFESSORES). O NOME do professor é identificado
-     automaticamente a partir do RA. RA inexistente ou senha errada =
-     login negado.
+     (identificador único) e a senha: o RA precisa existir no
+     professores.json e a senha precisa bater. O NOME do professor é
+     identificado automaticamente a partir do RA.
+     A senha conferida é:
+       - o campo "senhaHash" (SHA-256) do documento de ID = RA na
+         coleção "senhasProfessores" do Firestore, QUANDO esse documento
+         existe (senha própria do professor — a senha padrão não vale); ou
+       - a senha padrão "Professor2026@" (SENHA_PROFESSORES, no topo
+         deste arquivo), quando não existe documento para o RA.
+     RA inexistente ou senha errada = login negado.
      --------------------------------------------------------------- */
   async autenticarProfessor(ra, senha) {
     // relê o arquivo a cada tentativa: assim adicionar, remover ou
@@ -551,8 +559,40 @@ const Dados = {
 
     const raDigitado = comoTexto(ra);
     if (!raDigitado) return null;
-    // senha precisa ser EXATAMENTE igual (sem cortar espaços): "Professor2026@"
-    if (String(senha ?? "") !== SENHA_PROFESSORES) return null;
+    // a senha digitada é usada EXATAMENTE como veio, sem cortar espaços
+    // (nem no hash, nem na comparação com a senha padrão SENHA_PROFESSORES)
+    const senhaDigitada = String(senha ?? "");
+
+    // Senha própria do professor: existe um documento por RA na coleção
+    // "senhasProfessores" do Firestore (ID do documento = RA). Se esse
+    // documento existir, a senha digitada é conferida contra o campo
+    // "senhaHash" dele (SHA-256) em vez da senha padrão; se não existir,
+    // vale a comparação original com SENHA_PROFESSORES. Se a consulta ao
+    // Firestore falhar (sem rede, regras de acesso etc.), o aviso vai para
+    // o console e o login segue usando a senha padrão, pra não derrubar o
+    // acesso de todos.
+    let documentoDeSenha = null;
+    try {
+      const documento = await getDoc(doc(db, "senhasProfessores", raDigitado));
+      if (documento.exists()) documentoDeSenha = documento.data() || {};
+    } catch (erro) {
+      console.warn(
+        `Não foi possível consultar a senha própria do professor (RA ${raDigitado}) ` +
+          `na coleção "senhasProfessores"; usando a senha padrão SENHA_PROFESSORES.`,
+        erro
+      );
+    }
+
+    if (documentoDeSenha) {
+      // o professor tem senha própria: só entra com a senha que gera o
+      // hash gravado em "senhaHash" (a senha padrão NÃO é aceita nesse caso)
+      const senhaHash = comoTexto(documentoDeSenha.senhaHash).toLowerCase();
+      if (!senhaHash) return null; // documento sem "senhaHash": login negado
+      const hashDigitado = await gerarHashSha256(senhaDigitada);
+      if (hashDigitado !== senhaHash) return null;
+    } else if (senhaDigitada !== SENHA_PROFESSORES) {
+      return null;
+    }
 
     const professor = PROFESSORES.find((p) => p.ra === raDigitado);
     return professor ? { ...professor } : null;
@@ -690,6 +730,58 @@ const Dados = {
     } catch (erro) {
       throw new Error(
         `Não foi possível salvar a nova senha do aluno (RA ${raDigitado}) no Firestore: ${erro.message}`,
+        { cause: erro }
+      );
+    }
+
+    return { ra: raDigitado, senhaAlterada: true };
+  },
+
+  /* ---------------------------------------------------------------
+     TROCA DE SENHA DO PROFESSOR
+     Confere a senha atual com autenticarProfessor e, se estiver certa,
+     grava o SHA-256 da nova senha em senhasProfessores/{RA}.senhaHash —
+     o mesmo formato que o login lê (ver autenticarProfessor). Enquanto
+     a gravação não dá certo, a senha antiga continua valendo.
+       - senha atual errada ou RA inválido -> lança
+         Error("senha atual incorreta")
+       - falha técnica (Firestore fora do ar, crypto.subtle
+         indisponível etc.) -> sobe Error com contexto, para a tela
+         mostrar o problema real (não é "senha atual incorreta")
+       - sucesso -> devolve { ra, senhaAlterada: true }
+     --------------------------------------------------------------- */
+  async trocarSenhaProfessor(ra, senhaAtual, novaSenha) {
+    const raDigitado = comoTexto(ra);
+
+    // 1) valida a senha atual com as MESMAS regras do login
+    let professor;
+    try {
+      professor = await Dados.autenticarProfessor(raDigitado, senhaAtual);
+    } catch (erro) {
+      // não é senha errada: deu problema na própria conferência
+      throw new Error(
+        `Não foi possível conferir a senha atual do professor (RA ${
+          raDigitado || "não informado"
+        }): ${erro.message}`,
+        { cause: erro }
+      );
+    }
+
+    if (!professor) {
+      // RA inexistente ou senha atual incorreta
+      throw new Error("senha atual incorreta");
+    }
+
+    // 2) grava a nova senha: só o campo "senhaHash" no documento
+    // senhasProfessores/{RA}. O merge: true preserva outros campos que o
+    // documento já tenha, e o setDoc cria o documento quando ele ainda
+    // não existe (professor que até então usava a senha padrão).
+    const senhaHash = await gerarHashSha256(String(novaSenha ?? ""));
+    try {
+      await setDoc(doc(db, "senhasProfessores", raDigitado), { senhaHash }, { merge: true });
+    } catch (erro) {
+      throw new Error(
+        `Não foi possível salvar a nova senha do professor (RA ${raDigitado}) no Firestore: ${erro.message}`,
         { cause: erro }
       );
     }

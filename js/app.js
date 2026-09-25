@@ -27,6 +27,11 @@ const VIEWS = {
   // conferidos no servidor por Dados.trocarSenhaAluno
   "aluno-trocar-senha": { aoEntrar: () => limparTela("aluno-trocar-senha") },
 
+  // troca de senha do professor: não tem "guard" porque não depende de
+  // sessão — o próprio formulário pede o RA e a senha atual, que são
+  // conferidos no servidor por Dados.trocarSenhaProfessor
+  "professor-trocar-senha": { aoEntrar: () => limparTela("professor-trocar-senha") },
+
   "secretaria-login": { aoEntrar: () => limparTela("secretaria-login") },
 
   // só entra aqui se Sessao.obter().tipo === "PROFESSOR";
@@ -267,6 +272,70 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     // "senha atual incorreta" — ver Dados.trocarSenhaAluno)
     try {
       await Dados.trocarSenhaAluno(ra, senhaAtual, novaSenha);
+    } catch (erro) {
+      mensagemErro.textContent = /senha atual incorreta/i.test(erro.message)
+        ? "Senha atual incorreta. Confira o RA e a senha digitada."
+        : erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 3) deu certo: limpa o formulário e avisa ----
+    form.reset();
+    mensagemSucesso.style.display = "block";
+    setTimeout(() => (mensagemSucesso.style.display = "none"), 4000);
+  });
+})();
+
+/* =====================================================================
+   TELA: TROCAR SENHA DO PROFESSOR (ver view "professor-trocar-senha")
+   Chega aqui pelo link "Trocar senha" da tela de login do professor.
+   A conferência da senha atual e a gravação da nova senha acontecem no
+   servidor: é o Dados.trocarSenhaProfessor que confere o RA + a senha
+   atual e grava o hash da nova senha em senhasProfessores/{RA} (Firestore).
+   ===================================================================== */
+(function () {
+  const form = document.getElementById("pts-form-trocar-senha");
+  const mensagemErro = document.getElementById("pts-mensagem-erro");
+  const mensagemSucesso = document.getElementById("pts-mensagem-sucesso");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    // esconde o que sobrou da tentativa anterior
+    mensagemErro.style.display = "none";
+    mensagemSucesso.style.display = "none";
+
+    const ra = document.getElementById("pts-ra").value.trim();
+    const senhaAtual = document.getElementById("pts-senha-atual").value;
+    const novaSenha = document.getElementById("pts-nova-senha").value;
+    const confirmar = document.getElementById("pts-confirmar-senha").value;
+
+    // ---- 1) conferências que dá pra fazer aqui na tela ----
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!novaSenha) {
+      mensagemErro.textContent = "Informe a nova senha";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // as duas senhas novas precisam ser iguais
+    if (novaSenha !== confirmar) {
+      mensagemErro.textContent = "A nova senha e a confirmação não são iguais";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 2) confere a senha atual e grava a nova no servidor ----
+    // (se a senha atual estiver errada ou o RA não existir, o erro é
+    // "senha atual incorreta" — ver Dados.trocarSenhaProfessor)
+    try {
+      await Dados.trocarSenhaProfessor(ra, senhaAtual, novaSenha);
     } catch (erro) {
       mensagemErro.textContent = /senha atual incorreta/i.test(erro.message)
         ? "Senha atual incorreta. Confira o RA e a senha digitada."

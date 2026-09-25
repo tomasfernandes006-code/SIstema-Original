@@ -108,6 +108,10 @@
           <button type="submit" class="botao">Entrar</button>
         </form>
 
+        <p style="text-align:center; margin-top:20px;">
+          <a href="#" class="link-voltar" onclick="showView('professor-trocar-senha'); return false;">Trocar senha</a>
+        </p>
+
       </div>
     </div>
   </div>
@@ -200,6 +204,59 @@
 
         <p style="text-align:center; margin-top:20px;">
           <a href="#" class="link-voltar" onclick="showView('aluno-login'); return false;">← voltar para o login</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       TELA 2B — TROCAR SENHA DO PROFESSOR
+       Chega aqui pelo link "Trocar senha" da tela de login do professor
+       (não é protegida: exige o RA + a senha atual do professor)
+       ========================================================= -->
+  <div id="view-professor-trocar-senha" class="view tela">
+    <div class="container">
+      <a href="#" class="link-voltar" onclick="showView('professor-login'); return false;">← voltar</a>
+
+      <div class="folha" style="margin-top:16px;">
+        <div class="marca-icone" style="margin:0 auto 20px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="8" r="5"/></svg>
+        </div>
+        <p class="eyebrow">Acesso do professor</p>
+        <h1 class="titulo-grande" style="font-size:40px;">Trocar senha</h1>
+        <p class="subtitulo">Informe o seu RA, a senha atual e a nova senha</p>
+
+        <div class="sucesso" id="pts-mensagem-sucesso" style="display:none;">
+          ✓ Senha alterada com sucesso
+        </div>
+        <p class="erro" id="pts-mensagem-erro" style="display:none;"></p>
+
+        <form id="pts-form-trocar-senha">
+          <div class="campo">
+            <label class="rotulo" for="pts-ra">RA</label>
+            <input type="text" id="pts-ra" class="grande mono" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="000000" autocomplete="off" />
+          </div>
+
+          <div class="campo">
+            <label class="rotulo" for="pts-senha-atual">Senha atual</label>
+            <input type="password" id="pts-senha-atual" class="grande" placeholder="••••••" autocomplete="new-password" />
+          </div>
+
+          <div class="campo">
+            <label class="rotulo" for="pts-nova-senha">Nova senha</label>
+            <input type="password" id="pts-nova-senha" class="grande" placeholder="••••••" autocomplete="new-password" />
+          </div>
+
+          <div class="campo">
+            <label class="rotulo" for="pts-confirmar-senha">Confirmar nova senha</label>
+            <input type="password" id="pts-confirmar-senha" class="grande" placeholder="••••••" autocomplete="new-password" />
+          </div>
+
+          <button type="submit" class="botao">Trocar senha</button>
+        </form>
+
+        <p style="text-align:center; margin-top:20px;">
+          <a href="#" class="link-voltar" onclick="showView('professor-login'); return false;">← voltar para o login</a>
         </p>
       </div>
     </div>
