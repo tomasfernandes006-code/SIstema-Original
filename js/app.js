@@ -624,6 +624,51 @@ function limparJustificativaAtraso() {
   document.getElementById("atr-atestado-arquivo").value = "";
 }
 
+// comprime a foto do atestado no próprio navegador (canvas) e devolve uma
+// string base64 pronta pra gravar direto no Firestore, sem precisar do
+// Firebase Storage. Reduz a qualidade até caber no limite de 1MB por
+// documento do Firestore.
+function comprimirImagemAtestado(arquivo) {
+  return new Promise((resolve, reject) => {
+    if (!arquivo.type.startsWith("image/")) {
+      reject(new Error("O atestado precisa ser uma foto (jpg, png, etc.)"));
+      return;
+    }
+    const leitor = new FileReader();
+    leitor.onerror = () => reject(new Error("Não foi possível ler a foto do atestado"));
+    leitor.onload = () => {
+      const imagem = new Image();
+      imagem.onerror = () => reject(new Error("Essa foto não pôde ser aberta, tente outra"));
+      imagem.onload = () => {
+        const larguraMaxima = 1000;
+        const escala = Math.min(1, larguraMaxima / imagem.width);
+        const largura = Math.round(imagem.width * escala);
+        const altura = Math.round(imagem.height * escala);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = largura;
+        canvas.height = altura;
+        canvas.getContext("2d").drawImage(imagem, 0, 0, largura, altura);
+
+        let qualidade = 0.7;
+        let dataUrl = canvas.toDataURL("image/jpeg", qualidade);
+        while (dataUrl.length > 700000 && qualidade > 0.3) {
+          qualidade -= 0.1;
+          dataUrl = canvas.toDataURL("image/jpeg", qualidade);
+        }
+
+        if (dataUrl.length > 700000) {
+          reject(new Error("Essa foto ainda ficou grande demais. Tente tirar de novo com menos zoom."));
+          return;
+        }
+        resolve(dataUrl);
+      };
+      imagem.src = leitor.result;
+    };
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
 function prepararEntradaAtrasada() {
   const sessao = Sessao.obter();
   document.getElementById("atr-nome-aluno").textContent = sessao.nome;
@@ -690,7 +735,7 @@ function prepararEntradaAtrasada() {
 
     const atestadoArquivo = document.getElementById("atr-atestado-arquivo").files[0];
     if (justificativaAtrasoSelecionada === "ATESTADO" && !atestadoArquivo) {
-      mensagemErro.textContent = "Anexe uma foto ou PDF do atestado";
+      mensagemErro.textContent = "Anexe uma foto do atestado";
       mensagemErro.style.display = "block";
       return;
     }
@@ -698,6 +743,24 @@ function prepararEntradaAtrasada() {
     const botaoEnviar = form.querySelector("button[type=submit]");
     const textoOriginalBotao = botaoEnviar.textContent;
     botaoEnviar.disabled = true;
+
+    let atestadoBase64 = null;
+    let atestadoNomeArquivo = null;
+
+    try {
+      if (justificativaAtrasoSelecionada === "ATESTADO") {
+        botaoEnviar.textContent = "Comprimindo foto...";
+        atestadoBase64 = await comprimirImagemAtestado(atestadoArquivo);
+        atestadoNomeArquivo = atestadoArquivo.name;
+      }
+    } catch (erro) {
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      botaoEnviar.disabled = false;
+      botaoEnviar.textContent = textoOriginalBotao;
+      return;
+    }
+
     botaoEnviar.textContent = "Enviando...";
 
     try {
@@ -709,7 +772,8 @@ function prepararEntradaAtrasada() {
         motivo,
         justificativaTipo: justificativaAtrasoSelecionada,
         responsavelNome,
-        atestadoArquivo,
+        atestadoBase64,
+        atestadoNomeArquivo,
       });
     } catch (erro) {
       mensagemErro.textContent = erro.message;
@@ -1148,7 +1212,7 @@ function prepararEntradaAtrasada() {
           ${ent.justificativaTipo === "RESPONSAVEL"
             ? `Veio com responsável: ${escapar(ent.responsavelNome || "não informado")}`
             : ent.justificativaTipo === "ATESTADO"
-              ? `Atestado: ${ent.atestadoUrl ? `<a href="${ent.atestadoUrl}" target="_blank" rel="noopener">ver arquivo</a>` : "anexado"}`
+              ? `Atestado: ${ent.atestadoBase64 ? `<a href="${ent.atestadoBase64}" target="_blank" rel="noopener">ver foto</a>` : "anexado"}`
               : "Sem responsável ou atestado (registro antigo)"}
         </p>
 

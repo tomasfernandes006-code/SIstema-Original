@@ -1,10 +1,7 @@
-import { db, storage } from "./firebase-config.js";
+import { db } from "./firebase-config.js";
 import {
   collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, query, orderBy, onSnapshot, where
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
-import {
-  ref, uploadBytes, getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.7.0/firebase-storage.js";
 
 /* =====================================================================
    CAMADA DE DADOS (SIMULADA)
@@ -909,19 +906,10 @@ const Dados = {
   },
 
   // grava uma entrada atrasada nova na coleção "atrasos" do Firestore
-  // (o addDoc gera o id do documento automaticamente)
-  async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo, justificativaTipo, responsavelNome, atestadoArquivo }) {
-    let atestadoUrl = null;
-    let atestadoNomeArquivo = null;
-
-    if (justificativaTipo === "ATESTADO" && atestadoArquivo) {
-      const caminho = `atestados/${Date.now()}_${atestadoArquivo.name}`;
-      const referenciaArquivo = ref(storage, caminho);
-      await uploadBytes(referenciaArquivo, atestadoArquivo);
-      atestadoUrl = await getDownloadURL(referenciaArquivo);
-      atestadoNomeArquivo = atestadoArquivo.name;
-    }
-
+  // (o addDoc gera o id do documento automaticamente). A foto do atestado
+  // já chega pronta em base64 (comprimida no app.js): aqui só gravamos o
+  // texto, sem precisar do Firebase Storage.
+  async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo, justificativaTipo, responsavelNome, atestadoBase64, atestadoNomeArquivo }) {
     const nova = {
       alunoId,
       alunoNome,
@@ -930,8 +918,8 @@ const Dados = {
       motivo,
       justificativaTipo,
       responsavelNome: responsavelNome || null,
-      atestadoUrl,
-      atestadoNomeArquivo,
+      atestadoBase64: atestadoBase64 || null,
+      atestadoNomeArquivo: atestadoNomeArquivo || null,
       status: "NOVA",
       criadaEm: new Date().toISOString(),
       atualizadaEm: new Date().toISOString(),
