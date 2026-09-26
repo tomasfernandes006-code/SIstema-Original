@@ -613,6 +613,17 @@ function prepararNovaOcorrencia() {
    TELA: ENTRADA ATRASADA (era entrada-atrasada.html)
    — só é alcançável depois do login de aluno, ver VIEWS.guard
    ===================================================================== */
+let justificativaAtrasoSelecionada = null;
+
+function limparJustificativaAtraso() {
+  justificativaAtrasoSelecionada = null;
+  document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((b) => b.classList.remove("ativa"));
+  document.getElementById("atr-campo-responsavel").style.display = "none";
+  document.getElementById("atr-campo-atestado").style.display = "none";
+  document.getElementById("atr-responsavel-nome").value = "";
+  document.getElementById("atr-atestado-arquivo").value = "";
+}
+
 function prepararEntradaAtrasada() {
   const sessao = Sessao.obter();
   document.getElementById("atr-nome-aluno").textContent = sessao.nome;
@@ -628,9 +639,19 @@ function prepararEntradaAtrasada() {
   document.getElementById("atr-motivo").value = "";
   document.getElementById("atr-mensagem-erro").style.display = "none";
   document.getElementById("atr-mensagem-sucesso").style.display = "none";
+  limparJustificativaAtraso();
 }
 
 (function () {
+  document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      justificativaAtrasoSelecionada = botao.dataset.justificativa;
+      document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((b) => b.classList.toggle("ativa", b === botao));
+      document.getElementById("atr-campo-responsavel").style.display = justificativaAtrasoSelecionada === "RESPONSAVEL" ? "" : "none";
+      document.getElementById("atr-campo-atestado").style.display = justificativaAtrasoSelecionada === "ATESTADO" ? "" : "none";
+    });
+  });
+
   document.getElementById("atr-botao-sair").addEventListener("click", () => {
     Sessao.encerrar();
     showView("index");
@@ -645,8 +666,6 @@ function prepararEntradaAtrasada() {
     mensagemErro.style.display = "none";
 
     const sessao = Sessao.obter();
-    // a sala/turma NUNCA vem do que o aluno digitou: vem da lista de
-    // alunos do servidor, identificada pelo RA na hora do login
     const turma = sessao.sala || sessao.turma || "";
     const motivo = document.getElementById("atr-motivo").value.trim();
 
@@ -656,8 +675,31 @@ function prepararEntradaAtrasada() {
       return;
     }
 
-    // o atraso agora é gravado no SERVIDOR (POST /atrasos): o formulário
-    // só é limpo depois que o servidor confirmar
+    if (!justificativaAtrasoSelecionada) {
+      mensagemErro.textContent = "Selecione se você veio com responsável ou se tem atestado";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    const responsavelNome = document.getElementById("atr-responsavel-nome").value.trim();
+    if (justificativaAtrasoSelecionada === "RESPONSAVEL" && !responsavelNome) {
+      mensagemErro.textContent = "Informe o nome do responsável";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    const atestadoArquivo = document.getElementById("atr-atestado-arquivo").files[0];
+    if (justificativaAtrasoSelecionada === "ATESTADO" && !atestadoArquivo) {
+      mensagemErro.textContent = "Anexe uma foto ou PDF do atestado";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    const botaoEnviar = form.querySelector("button[type=submit]");
+    const textoOriginalBotao = botaoEnviar.textContent;
+    botaoEnviar.disabled = true;
+    botaoEnviar.textContent = "Enviando...";
+
     try {
       await Dados.criarEntradaAtrasada({
         alunoId: sessao.id,
@@ -665,17 +707,26 @@ function prepararEntradaAtrasada() {
         alunoRa: sessao.ra,
         turma,
         motivo,
+        justificativaTipo: justificativaAtrasoSelecionada,
+        responsavelNome,
+        atestadoArquivo,
       });
     } catch (erro) {
       mensagemErro.textContent = erro.message;
       mensagemErro.style.display = "block";
+      botaoEnviar.disabled = false;
+      botaoEnviar.textContent = textoOriginalBotao;
       return;
     }
+
+    botaoEnviar.disabled = false;
+    botaoEnviar.textContent = textoOriginalBotao;
 
     form.reset();
     document.getElementById("atr-aluno-nome").value = sessao.nome;
     document.getElementById("atr-aluno-ra").value = sessao.ra;
     document.getElementById("atr-turma").value = sessao.sala || sessao.turma || "";
+    limparJustificativaAtraso();
 
     mensagemSucesso.style.display = "block";
     setTimeout(() => {
@@ -1093,6 +1144,13 @@ function prepararEntradaAtrasada() {
         </div>
 
         <p class="detalhes-ocorrencia">${escapar(ent.motivo)}</p>
+        <p class="meta-aluno" style="margin-top:4px;">
+          ${ent.justificativaTipo === "RESPONSAVEL"
+            ? `Veio com responsável: ${escapar(ent.responsavelNome || "não informado")}`
+            : ent.justificativaTipo === "ATESTADO"
+              ? `Atestado: ${ent.atestadoUrl ? `<a href="${ent.atestadoUrl}" target="_blank" rel="noopener">ver arquivo</a>` : "anexado"}`
+              : "Sem responsável ou atestado (registro antigo)"}
+        </p>
 
         <div class="linha-acoes">
           <span class="tag-status" style="${ESTILO_STATUS[ent.status] || ""}">${escapar(String(ent.status ?? "").replace("_", " "))}</span>

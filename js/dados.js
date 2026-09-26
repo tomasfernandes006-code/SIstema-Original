@@ -1,7 +1,10 @@
-import { db } from "./firebase-config.js";
+import { db, storage } from "./firebase-config.js";
 import {
   collection, addDoc, getDocs, doc, getDoc, setDoc, updateDoc, query, orderBy, onSnapshot, where
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+import {
+  ref, uploadBytes, getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.7.0/firebase-storage.js";
 
 /* =====================================================================
    CAMADA DE DADOS (SIMULADA)
@@ -907,20 +910,34 @@ const Dados = {
 
   // grava uma entrada atrasada nova na coleção "atrasos" do Firestore
   // (o addDoc gera o id do documento automaticamente)
-  async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo }) {
+  async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo, justificativaTipo, responsavelNome, atestadoArquivo }) {
+    let atestadoUrl = null;
+    let atestadoNomeArquivo = null;
+
+    if (justificativaTipo === "ATESTADO" && atestadoArquivo) {
+      const caminho = `atestados/${Date.now()}_${atestadoArquivo.name}`;
+      const referenciaArquivo = ref(storage, caminho);
+      await uploadBytes(referenciaArquivo, atestadoArquivo);
+      atestadoUrl = await getDownloadURL(referenciaArquivo);
+      atestadoNomeArquivo = atestadoArquivo.name;
+    }
+
     const nova = {
       alunoId,
       alunoNome,
       alunoRa,
       turma: turma || null,
       motivo,
+      justificativaTipo,
+      responsavelNome: responsavelNome || null,
+      atestadoUrl,
+      atestadoNomeArquivo,
       status: "NOVA",
       criadaEm: new Date().toISOString(),
       atualizadaEm: new Date().toISOString(),
     };
     const referencia = await addDoc(collection(db, "atrasos"), nova);
     avisarMudancaEntradasAtrasadas();
-    // devolve a entrada atrasada já com o id do documento criado no Firestore
     return { id: referencia.id, ...nova };
   },
 

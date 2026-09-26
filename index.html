@@ -441,6 +441,27 @@
             <textarea id="atr-motivo" rows="4" placeholder="Conte o que aconteceu..."></textarea>
           </div>
 
+          <div class="campo">
+            <span class="rotulo">Como você chegou?</span>
+            <div class="pastilhas" id="atr-pastilhas-justificativa">
+              <button type="button" class="pastilha" data-justificativa="RESPONSAVEL">Vim com responsável</button>
+              <button type="button" class="pastilha" data-justificativa="ATESTADO">Tenho atestado</button>
+            </div>
+            <p style="font-size:12px; color:var(--text-2); margin-top:8px;">
+              Sem uma dessas duas opções a secretaria não libera a sua entrada.
+            </p>
+          </div>
+
+          <div class="campo" id="atr-campo-responsavel" style="display:none;">
+            <label class="rotulo" for="atr-responsavel-nome">Nome do responsável</label>
+            <input type="text" id="atr-responsavel-nome" placeholder="Nome de quem te acompanhou" />
+          </div>
+
+          <div class="campo" id="atr-campo-atestado" style="display:none;">
+            <label class="rotulo" for="atr-atestado-arquivo">Foto ou PDF do atestado</label>
+            <input type="file" id="atr-atestado-arquivo" accept="image/*,.pdf" />
+          </div>
+
           <button type="submit" class="botao" style="font-size:16px; padding:18px;">
             Enviar para a secretaria
           </button>
