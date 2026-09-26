@@ -1212,7 +1212,7 @@ function prepararEntradaAtrasada() {
           ${ent.justificativaTipo === "RESPONSAVEL"
             ? `Veio com responsável: ${escapar(ent.responsavelNome || "não informado")}`
             : ent.justificativaTipo === "ATESTADO"
-              ? `Atestado: ${ent.atestadoBase64 ? `<a href="${ent.atestadoBase64}" target="_blank" rel="noopener">ver foto</a>` : "anexado"}`
+              ? `Atestado: ${ent.atestadoBase64 ? `<a href="#" onclick="verAtestado('${ent.id}'); return false;">ver foto</a>` : "anexado"}`
               : "Sem responsável ou atestado (registro antigo)"}
         </p>
 
@@ -1260,6 +1260,27 @@ function prepararEntradaAtrasada() {
       console.error("Não foi possível mudar o status da entrada atrasada.", erro);
     }
     renderizar();
+  };
+
+  // abre a foto do atestado numa aba nova. Não usamos <a href="data:...">
+  // direto porque o Chrome bloqueia navegar pra uma URL base64 por
+  // segurança — em vez disso abrimos uma aba em branco e desenhamos a
+  // imagem dentro dela.
+  window.verAtestado = function (id) {
+    const entrada = atrasosDoPainel.find((e) => e.id === id);
+    if (!entrada || !entrada.atestadoBase64) return;
+    const janela = window.open("", "_blank");
+    if (!janela) {
+      alert("Seu navegador bloqueou a abertura da aba. Permita pop-ups para este site e tente de novo.");
+      return;
+    }
+    janela.document.write(`
+      <title>Atestado</title>
+      <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <img src="${entrada.atestadoBase64}" style="max-width:100%;max-height:100vh;" />
+      </body>
+    `);
+    janela.document.close();
   };
 
   document.querySelectorAll(".filtro-btn").forEach((botao) => {
