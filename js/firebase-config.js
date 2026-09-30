@@ -1,6 +1,7 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+import { getMessaging } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging.js";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -23,4 +24,15 @@ const app = initializeApp(firebaseConfig);
 //   import { db } from "./firebase-config.js";
 const db = getFirestore(app);
 
-export { app, db };
+// Instância do Messaging (notificações push). Fica em try/catch porque
+// getMessaging pode não ser suportado em ambientes sem service worker
+// (ex.: página aberta por file://), e isso não pode derrubar o resto.
+//   import { messaging } from "./firebase-config.js";
+let messaging = null;
+try {
+  messaging = getMessaging(app);
+} catch {
+  messaging = null;
+}
+
+export { app, db, messaging };

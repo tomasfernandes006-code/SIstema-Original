@@ -1,3 +1,5 @@
+import { ativarPush } from "./push.js";
+
 /* =====================================================================
    ROTEADOR — troca de tela dentro do arquivo central (index.html)
    ---------------------------------------------------------------------
@@ -1309,9 +1311,15 @@ function prepararEntradaAtrasada() {
   });
 
   document.getElementById("pn-botao-notificacao").addEventListener("click", async () => {
-    const ok = await Notificacoes.pedirPermissao();
     const botao = document.getElementById("pn-botao-notificacao");
-    botao.textContent = ok ? "🔔 Notificações ativas" : "Permissão negada";
+    botao.textContent = "🔔 Ativando...";
+    let token = null;
+    try {
+      token = await ativarPush();
+    } catch (erro) {
+      console.error("Não foi possível ativar as notificações push.", erro);
+    }
+    botao.textContent = token ? "🔔 Notificações ativas" : "Permissão negada";
   });
 
   // A lista de alunos (GET /alunos) também vem do servidor: quando ela
@@ -1349,6 +1357,14 @@ function prepararEntradaAtrasada() {
     cancelarEscutaAtrasos = Dados.aoMudarEntradasAtrasadas(renderizar);
 
     renderizar();
+
+    // se a permissão de notificação já foi concedida antes, reativa o
+    // push (registra o service worker e atualiza o token) sem pedir de novo
+    if ("Notification" in window && Notification.permission === "granted") {
+      ativarPush().catch((erro) =>
+        console.error("Não foi possível reativar as notificações push.", erro)
+      );
+    }
   };
 
   window.pararPainel = function () {

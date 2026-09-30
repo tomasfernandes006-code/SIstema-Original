@@ -9,8 +9,29 @@ const Notificacoes = {
 
   notificar(titulo, corpo) {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+    const opcoes = { body: corpo, icon: "assets/icone-ocorrencia.svg" };
+
+    // caminho principal: mostrar pela registration do service worker,
+    // que funciona também onde `new Notification` é bloqueado (ex.: Chrome
+    // no Android). Se não houver service worker ou o showNotification
+    // falhar, cai no fallback atual com `new Notification`.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.ready
+        .then((registro) => registro.showNotification(titulo, opcoes))
+        .catch(() => {
+          try {
+            new Notification(titulo, opcoes);
+          } catch {
+            // alguns navegadores de celular não permitem `new Notification` direto;
+            // nesse caso, o som e a atualização da tela ainda acontecem normalmente.
+          }
+        });
+      return;
+    }
+
     try {
-      new Notification(titulo, { body: corpo, icon: "assets/icone-ocorrencia.svg" });
+      new Notification(titulo, opcoes);
     } catch {
       // alguns navegadores de celular não permitem `new Notification` direto;
       // nesse caso, o som e a atualização da tela ainda acontecem normalmente.
