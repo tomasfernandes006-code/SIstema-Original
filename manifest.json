@@ -1,0 +1,13 @@
+{
+  "name": "Sistema de Ocorrências",
+  "short_name": "Ocorrências",
+  "start_url": "/#/painel",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "assets/icone-ocorrencia.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

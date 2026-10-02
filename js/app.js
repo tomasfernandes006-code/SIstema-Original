@@ -1,0 +1,1432 @@
+import { ativarPush } from "./push.js";
+
+/* =====================================================================
+   ROTEADOR — troca de tela dentro do arquivo central (index.html)
+   ---------------------------------------------------------------------
+   Antes cada tela era um arquivo .html separado (index.html,
+   professor.html, nova-ocorrencia.html, etc.) e a navegação era feita
+   trocando de página (window.location.href = "...").
+
+   Agora todas as telas vivem dentro de index.html, como blocos
+   <div class="view" id="view-NOME">. Este arquivo decide qual bloco
+   fica visível a cada momento — e, o mais importante, aplica as
+   MESMAS regras de acesso de antes: só é possível ver a tela de
+   "nova ocorrência" se estiver logado como PROFESSOR, e só é
+   possível ver "entrada atrasada" se estiver logado como ALUNO, e
+   só é possível ver o "painel" se estiver logado como SECRETARIA.
+   Se não estiver logado com o perfil certo, cai automaticamente na
+   tela de login correspondente — exatamente como as páginas antigas
+   faziam ao checar `Sessao.obter()` e redirecionar.
+   ===================================================================== */
+
+const VIEWS = {
+  "index": {},
+  "professor-login": { aoEntrar: () => limparTela("professor-login") },
+  "aluno-login": { aoEntrar: () => limparTela("aluno-login") },
+
+  // troca de senha do aluno: não tem "guard" porque não depende de
+  // sessão — o próprio formulário pede o RA e a senha atual, que são
+  // conferidos no servidor por Dados.trocarSenhaAluno
+  "aluno-trocar-senha": { aoEntrar: () => limparTela("aluno-trocar-senha") },
+
+  // troca de senha do professor: não tem "guard" porque não depende de
+  // sessão — o próprio formulário pede o RA e a senha atual, que são
+  // conferidos no servidor por Dados.trocarSenhaProfessor
+  "professor-trocar-senha": { aoEntrar: () => limparTela("professor-trocar-senha") },
+
+  "secretaria-login": { aoEntrar: () => limparTela("secretaria-login") },
+
+  // só entra aqui se Sessao.obter().tipo === "PROFESSOR";
+  // caso contrário, é mandado para a tela de login do professor
+  "nova-ocorrencia": {
+    guard: () => Sessao.obter()?.tipo === "PROFESSOR",
+    guardRedirect: "professor-login",
+    aoEntrar: () => prepararNovaOcorrencia(),
+  },
+
+  // só entra aqui se Sessao.obter().tipo === "ALUNO";
+  // caso contrário, é mandado para a tela de login do aluno
+  "entrada-atrasada": {
+    guard: () => Sessao.obter()?.tipo === "ALUNO",
+    guardRedirect: "aluno-login",
+    aoEntrar: () => prepararEntradaAtrasada(),
+  },
+
+  // só entra aqui se Sessao.obter().tipo === "SECRETARIA";
+  // caso contrário, é mandado para a tela de login da secretaria
+  "painel": {
+    guard: () => Sessao.obter()?.tipo === "SECRETARIA",
+    guardRedirect: "secretaria-login",
+    // entrada no painel: liga a escuta em tempo real (onSnapshot) e faz
+    // o primeiro desenho do painel (ver window.iniciarPainel)
+    aoEntrar: (sub) => {
+      window.iniciarPainel();
+      window.alternarPainel(sub);
+    },
+  },
+
+  "qrcode": {
+    aoEntrar: () => prepararQrCode(),
+  },
+};
+
+// A tela atual fica guardada no hash da URL (ex.: #/painel/atrasos),
+// assim o F5 e o botão voltar do navegador funcionam.
+const PAINEIS = ["dashboard", "ocorrencias", "atrasos"];
+let viewAtual = null;
+
+function lerUrl() {
+  const [view, sub] = location.hash.replace(/^#\/?/, "").split("/");
+  return {
+    view: Object.prototype.hasOwnProperty.call(VIEWS, view) ? view : "index",
+    sub: sub || null,
+  };
+}
+
+function atualizarUrl(view, sub, substituir) {
+  const hash = view === "index" ? "" : "#/" + view + (sub ? "/" + sub : "");
+  if (location.hash === hash) return;
+  try {
+    history[substituir ? "replaceState" : "pushState"](null, "", location.pathname + location.search + hash);
+  } catch {
+    // ambiente que bloqueia a History API: a tela troca normalmente, só a URL não acompanha
+  }
+}
+
+// Esvazia uma tela de login: RA/usuário, senhas e mensagens de erro/sucesso.
+// Roda toda vez que a tela é aberta, assim quem usa o computador depois
+// nunca vê o que o usuário anterior digitou.
+function limparTela(id) {
+  const tela = document.getElementById("view-" + id);
+  tela.querySelectorAll("input").forEach((campo) => (campo.value = ""));
+  tela
+    .querySelectorAll('[id$="-mensagem-erro"], [id$="-mensagem-sucesso"]')
+    .forEach((msg) => (msg.style.display = "none"));
+}
+
+// historico: "push" (padrão), "replace" ou "nenhum" (a URL já está certa, ex.: botão voltar)
+function showView(id, { sub = null, historico = "push" } = {}) {
+  let cfg = VIEWS[id];
+  if (cfg && cfg.guard && !cfg.guard()) {
+    id = cfg.guardRedirect;
+    cfg = VIEWS[id];
+    sub = null;
+    if (historico === "nenhum") historico = "replace";
+  }
+
+  // saiu do painel por qualquer caminho (inclusive botão voltar): desliga a escuta em tempo real
+  if (viewAtual === "painel" && id !== "painel" && window.pararPainel) window.pararPainel();
+
+  document.querySelectorAll(".view").forEach((v) => v.classList.remove("ativo"));
+  document.getElementById("view-" + id).classList.add("ativo");
+  window.scrollTo(0, 0);
+  viewAtual = id;
+
+  if (id !== "painel") sub = null;
+  else if (!PAINEIS.includes(sub)) sub = "dashboard";
+
+  if (historico !== "nenhum") atualizarUrl(id, sub, historico === "replace");
+  if (cfg && cfg.aoEntrar) cfg.aoEntrar(sub);
+}
+
+/* =====================================================================
+   TELA: LOGIN PROFESSOR (era professor.html)
+   ===================================================================== */
+(function () {
+  const form = document.getElementById("pl-form-login");
+  const mensagemErro = document.getElementById("pl-mensagem-erro");
+
+  // o login é conferido no professores.json a cada tentativa, então
+  // o envio do formulário precisa esperar a resposta (async / await)
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const ra = document.getElementById("pl-ra").value.trim();
+    const senha = document.getElementById("pl-senha").value;
+
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    let professor;
+    try {
+      professor = await Dados.autenticarProfessor(ra, senha);
+    } catch (erro) {
+      // servidor fora do ar / endereço errado (não é senha errada)
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!professor) {
+      mensagemErro.textContent = Dados.professoresCarregados()
+        ? "RA não encontrado ou senha incorreta."
+        : "Não foi possível carregar a lista de professores (professores.json).";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    mensagemErro.style.display = "none";
+    Sessao.salvar(professor);
+    // só depois de logar como professor é que a tela de nova
+    // ocorrência é liberada (ver "guard" em VIEWS acima)
+    showView("nova-ocorrencia");
+  });
+})();
+
+/* =====================================================================
+   TELA: LOGIN ALUNO (era aluno.html)
+   ===================================================================== */
+(function () {
+  const form = document.getElementById("al-form-login");
+  const mensagemErro = document.getElementById("al-mensagem-erro");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    // O acesso do aluno é conferido no SERVIDOR (POST /login/aluno): o
+    // RA precisa existir na lista de alunos do servidor (que devolve
+    // sozinho o nome, a sala e o turno) e a senha precisa ser
+    // exatamente "@Coronel2026".
+    // RA inexistente ou senha errada = login bloqueado.
+    const ra = document.getElementById("al-ra").value.trim();
+    const senha = document.getElementById("al-senha").value;
+
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    let aluno;
+    try {
+      aluno = await Dados.autenticarAluno(ra, senha);
+    } catch (erro) {
+      // servidor fora do ar / endereço errado (não é RA/senha errados)
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!aluno) {
+      mensagemErro.textContent = Dados.alunosCarregados()
+        ? "RA não encontrado ou senha incorreta."
+        : "Não foi possível carregar a lista de alunos (GET /alunos).";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    mensagemErro.style.display = "none";
+    Sessao.salvar(aluno);
+    // só depois de logar como aluno é que a tela de entrada
+    // atrasada é liberada (ver "guard" em VIEWS acima)
+    showView("entrada-atrasada");
+  });
+})();
+
+/* =====================================================================
+   TELA: TROCAR SENHA DO ALUNO (ver view "aluno-trocar-senha")
+   Chega aqui pelo link "Trocar senha" da tela de login do aluno.
+   A conferência da senha atual e a gravação da nova senha acontecem no
+   servidor: é o Dados.trocarSenhaAluno que confere o RA + a senha atual
+   e grava o hash da nova senha em senhasAlunos/{RA} (Firestore).
+   ===================================================================== */
+(function () {
+  const form = document.getElementById("ats-form-trocar-senha");
+  const mensagemErro = document.getElementById("ats-mensagem-erro");
+  const mensagemSucesso = document.getElementById("ats-mensagem-sucesso");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    // esconde o que sobrou da tentativa anterior
+    mensagemErro.style.display = "none";
+    mensagemSucesso.style.display = "none";
+
+    const ra = document.getElementById("ats-ra").value.trim();
+    const senhaAtual = document.getElementById("ats-senha-atual").value;
+    const novaSenha = document.getElementById("ats-nova-senha").value;
+    const confirmar = document.getElementById("ats-confirmar-senha").value;
+
+    // ---- 1) conferências que dá pra fazer aqui na tela ----
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!novaSenha) {
+      mensagemErro.textContent = "Informe a nova senha";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // as duas senhas novas precisam ser iguais
+    if (novaSenha !== confirmar) {
+      mensagemErro.textContent = "A nova senha e a confirmação não são iguais";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 2) confere a senha atual e grava a nova no servidor ----
+    // (se a senha atual estiver errada ou o RA não existir, o erro é
+    // "senha atual incorreta" — ver Dados.trocarSenhaAluno)
+    try {
+      await Dados.trocarSenhaAluno(ra, senhaAtual, novaSenha);
+    } catch (erro) {
+      mensagemErro.textContent = /senha atual incorreta/i.test(erro.message)
+        ? "Senha atual incorreta. Confira o RA e a senha digitada."
+        : erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 3) deu certo: limpa o formulário e avisa ----
+    form.reset();
+    mensagemSucesso.style.display = "block";
+    setTimeout(() => (mensagemSucesso.style.display = "none"), 4000);
+  });
+})();
+
+/* =====================================================================
+   TELA: TROCAR SENHA DO PROFESSOR (ver view "professor-trocar-senha")
+   Chega aqui pelo link "Trocar senha" da tela de login do professor.
+   A conferência da senha atual e a gravação da nova senha acontecem no
+   servidor: é o Dados.trocarSenhaProfessor que confere o RA + a senha
+   atual e grava o hash da nova senha em senhasProfessores/{RA} (Firestore).
+   ===================================================================== */
+(function () {
+  const form = document.getElementById("pts-form-trocar-senha");
+  const mensagemErro = document.getElementById("pts-mensagem-erro");
+  const mensagemSucesso = document.getElementById("pts-mensagem-sucesso");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    // esconde o que sobrou da tentativa anterior
+    mensagemErro.style.display = "none";
+    mensagemSucesso.style.display = "none";
+
+    const ra = document.getElementById("pts-ra").value.trim();
+    const senhaAtual = document.getElementById("pts-senha-atual").value;
+    const novaSenha = document.getElementById("pts-nova-senha").value;
+    const confirmar = document.getElementById("pts-confirmar-senha").value;
+
+    // ---- 1) conferências que dá pra fazer aqui na tela ----
+    if (!ra) {
+      mensagemErro.textContent = "Informe o seu RA";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!novaSenha) {
+      mensagemErro.textContent = "Informe a nova senha";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // as duas senhas novas precisam ser iguais
+    if (novaSenha !== confirmar) {
+      mensagemErro.textContent = "A nova senha e a confirmação não são iguais";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 2) confere a senha atual e grava a nova no servidor ----
+    // (se a senha atual estiver errada ou o RA não existir, o erro é
+    // "senha atual incorreta" — ver Dados.trocarSenhaProfessor)
+    try {
+      await Dados.trocarSenhaProfessor(ra, senhaAtual, novaSenha);
+    } catch (erro) {
+      mensagemErro.textContent = /senha atual incorreta/i.test(erro.message)
+        ? "Senha atual incorreta. Confira o RA e a senha digitada."
+        : erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // ---- 3) deu certo: limpa o formulário e avisa ----
+    form.reset();
+    mensagemSucesso.style.display = "block";
+    setTimeout(() => (mensagemSucesso.style.display = "none"), 4000);
+  });
+})();
+
+/* =====================================================================
+   TELA: LOGIN SECRETARIA (era secretaria.html)
+   ===================================================================== */
+(function () {
+  const form = document.getElementById("sl-form-login");
+  const mensagemErro = document.getElementById("sl-mensagem-erro");
+
+  // o login agora é conferido no SERVIDOR (POST /login/secretaria), então
+  // o envio do formulário precisa esperar a resposta (async / await)
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const usuario = document.getElementById("sl-usuario").value.trim();
+    const senha = document.getElementById("sl-senha").value.trim();
+
+    let conta;
+    try {
+      conta = await Dados.autenticarSecretaria(usuario, senha);
+    } catch (erro) {
+      // servidor fora do ar / endereço errado (não é usuário/senha errados)
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!conta) {
+      mensagemErro.textContent = "Usuário ou senha inválidos";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    mensagemErro.style.display = "none";
+    Sessao.salvar(conta);
+    // só depois de logar como secretaria é que o painel é
+    // liberado (ver "guard" em VIEWS acima)
+    showView("painel");
+  });
+})();
+
+/* =====================================================================
+   TELA: NOVA OCORRÊNCIA (era nova-ocorrencia.html)
+   — só é alcançável depois do login de professor, ver VIEWS.guard
+   ===================================================================== */
+function prepararNovaOcorrencia() {
+  const sessao = Sessao.obter();
+  document.getElementById("oc-nome-professor").textContent = `Prof(a). ${sessao.nome}`;
+  // recomeça o seletor em 3 etapas (turno -> sala -> aluno) do zero
+  // toda vez que a tela é aberta
+  if (window.prepararSeletorAlunos) window.prepararSeletorAlunos();
+  // relê a lista de alunos no servidor (GET /alunos): quando ela chegar,
+  // o evento "alunos:carregados" (lá embaixo) remonta o seletor
+  Dados.carregarAlunos();
+}
+
+(function () {
+  document.getElementById("oc-botao-sair").addEventListener("click", () => {
+    Sessao.encerrar();
+    showView("index");
+  });
+
+  let tipoSelecionado = "INDISCIPLINA";
+  let gravidadeSelecionada = "LEVE";
+
+  document.querySelectorAll("#oc-pastilhas-tipo .pastilha").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      document.querySelectorAll("#oc-pastilhas-tipo .pastilha").forEach((b) => b.classList.remove("ativa"));
+      botao.classList.add("ativa");
+      tipoSelecionado = botao.dataset.tipo;
+    });
+  });
+
+  document.querySelectorAll("#oc-opcoes-gravidade .gravidade-btn").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      document.querySelectorAll("#oc-opcoes-gravidade .gravidade-btn").forEach((b) => b.classList.remove("ativa"));
+      botao.classList.add("ativa");
+      gravidadeSelecionada = botao.dataset.gravidade;
+    });
+  });
+
+  /* ---------------------------------------------------------------
+     SELETOR DO ALUNO EM 3 ETAPAS (turno -> sala/turma -> aluno)
+     O professor não digita mais nome nem RA: escolhe o turno,
+     depois a sala daquele turno e, por fim, o aluno daquela sala.
+     Ao escolher o aluno, nome/RA/turma são preenchidos sozinhos e
+     ficam bloqueados para edição.
+     --------------------------------------------------------------- */
+  const seletorTurno = document.getElementById("oc-turno");
+  const seletorSala = document.getElementById("oc-sala");
+  const seletorAluno = document.getElementById("oc-aluno");
+  const campoAlunoNome = document.getElementById("oc-aluno-nome");
+  const campoAlunoRa = document.getElementById("oc-aluno-ra");
+  const campoTurma = document.getElementById("oc-turma");
+
+  const TEXTO_TURNO_VAZIO = "Selecione o turno";
+  const TEXTO_SALA_VAZIA = "Escolha o turno primeiro";
+  const TEXTO_ALUNO_VAZIO = "Escolha a sala primeiro";
+
+  // troca as <option> de um <select>, sempre começando por uma vazia
+  function preencherOpcoes(select, textoVazio, opcoes) {
+    select.innerHTML = "";
+    const vazia = document.createElement("option");
+    vazia.value = "";
+    vazia.textContent = textoVazio;
+    select.appendChild(vazia);
+    opcoes.forEach(({ valor, texto }) => {
+      const opcao = document.createElement("option");
+      opcao.value = valor;
+      opcao.textContent = texto;
+      select.appendChild(opcao);
+    });
+  }
+
+  // limpa os campos que são preenchidos automaticamente
+  function limparAlunoEscolhido() {
+    campoAlunoNome.value = "";
+    campoAlunoRa.value = "";
+    campoTurma.value = "";
+  }
+
+  function limparSeletorSala() {
+    seletorSala.disabled = true;
+    preencherOpcoes(seletorSala, TEXTO_SALA_VAZIA, []);
+  }
+
+  function limparSeletorAluno() {
+    seletorAluno.disabled = true;
+    preencherOpcoes(seletorAluno, TEXTO_ALUNO_VAZIO, []);
+    limparAlunoEscolhido();
+  }
+
+  // volta o seletor para o estado inicial (usado ao abrir a tela e
+  // depois de enviar uma ocorrência)
+  function prepararSeletorAlunos() {
+    preencherOpcoes(
+      seletorTurno,
+      TEXTO_TURNO_VAZIO,
+      Dados.listarTurnos().map((turno) => ({ valor: turno, texto: turno }))
+    );
+    seletorTurno.value = "";
+    limparSeletorSala();
+    limparSeletorAluno();
+  }
+
+  // etapa 1 -> etapa 2: carrega as salas/turmas do turno escolhido
+  seletorTurno.addEventListener("change", () => {
+    limparSeletorAluno();
+
+    const turno = seletorTurno.value;
+    if (!turno) {
+      limparSeletorSala();
+      return;
+    }
+
+    const salas = Dados.listarSalas(turno);
+    preencherOpcoes(
+      seletorSala,
+      salas.length ? "Selecione a sala / turma" : "Nenhuma sala neste turno",
+      salas.map((sala) => ({ valor: sala, texto: sala }))
+    );
+    seletorSala.disabled = salas.length === 0;
+  });
+
+  // etapa 2 -> etapa 3: carrega os alunos da sala escolhida
+  seletorSala.addEventListener("change", () => {
+    limparAlunoEscolhido();
+    seletorAluno.value = "";
+
+    const sala = seletorSala.value;
+    if (!sala) {
+      limparSeletorAluno();
+      return;
+    }
+
+    const alunos = Dados.listarAlunosPorSala(seletorTurno.value, sala);
+    preencherOpcoes(
+      seletorAluno,
+      alunos.length ? "Selecione o aluno" : "Nenhum aluno nesta sala",
+      alunos.map((aluno) => ({ valor: aluno.ra, texto: aluno.nome }))
+    );
+    seletorAluno.disabled = alunos.length === 0;
+  });
+
+  // etapa 3: preenche automaticamente nome, RA e turma do aluno
+  seletorAluno.addEventListener("change", () => {
+    const aluno = seletorAluno.value ? Dados.buscarAlunoPorRa(seletorAluno.value) : null;
+
+    if (!aluno) {
+      limparAlunoEscolhido();
+      return;
+    }
+
+    campoAlunoNome.value = aluno.nome;
+    campoAlunoRa.value = aluno.ra;
+    campoTurma.value = aluno.sala || aluno.turma || "";
+  });
+
+  prepararSeletorAlunos();
+
+  // exposto para prepararNovaOcorrencia() poder recomeçar o seletor
+  // do zero sempre que a tela de nova ocorrência for aberta
+  window.prepararSeletorAlunos = prepararSeletorAlunos;
+
+  // quando a lista de alunos chegar do servidor (GET /alunos), se o
+  // professor ainda não escolheu nada, o seletor é montado com ela
+  window.addEventListener("alunos:carregados", () => {
+    if (!seletorTurno.value) prepararSeletorAlunos();
+  });
+
+  const form = document.getElementById("oc-form-ocorrencia");
+  const mensagemErro = document.getElementById("oc-mensagem-erro");
+  const mensagemSucesso = document.getElementById("oc-mensagem-sucesso");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    mensagemErro.style.display = "none";
+
+    const sessao = Sessao.obter();
+    // o aluno vem do seletor em 3 etapas — nada é digitado à mão
+    const aluno = seletorAluno.value ? Dados.buscarAlunoPorRa(seletorAluno.value) : null;
+    const detalhes = document.getElementById("oc-detalhes").value.trim();
+
+    if (!aluno) {
+      mensagemErro.textContent = "Selecione o turno, a sala e o aluno";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // a ocorrência agora é gravada no SERVIDOR (POST /ocorrencias):
+    // o formulário só é limpo depois que o servidor confirmar
+    try {
+      await Dados.criarOcorrencia({
+        professorId: sessao.id,
+        professorNome: sessao.nome,
+        alunoNome: aluno.nome,
+        alunoRa: aluno.ra,
+        turma: aluno.sala || aluno.turma || "",
+        tipo: tipoSelecionado,
+        gravidade: gravidadeSelecionada,
+        detalhes,
+      });
+    } catch (erro) {
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    form.reset();
+    prepararSeletorAlunos();
+    tipoSelecionado = "INDISCIPLINA";
+    gravidadeSelecionada = "LEVE";
+    document.querySelectorAll("#oc-pastilhas-tipo .pastilha").forEach((b, i) => b.classList.toggle("ativa", i === 0));
+    document.querySelectorAll("#oc-opcoes-gravidade .gravidade-btn").forEach((b, i) => b.classList.toggle("ativa", i === 0));
+
+    mensagemSucesso.style.display = "block";
+    setTimeout(() => (mensagemSucesso.style.display = "none"), 3000);
+    seletorTurno.focus();
+  });
+})();
+
+/* =====================================================================
+   TELA: ENTRADA ATRASADA (era entrada-atrasada.html)
+   — só é alcançável depois do login de aluno, ver VIEWS.guard
+   ===================================================================== */
+let justificativaAtrasoSelecionada = null;
+
+function limparJustificativaAtraso() {
+  justificativaAtrasoSelecionada = null;
+  document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((b) => b.classList.remove("ativa"));
+  document.getElementById("atr-campo-responsavel").style.display = "none";
+  document.getElementById("atr-campo-atestado").style.display = "none";
+  document.getElementById("atr-responsavel-nome").value = "";
+  document.getElementById("atr-atestado-arquivo").value = "";
+}
+
+// comprime a foto do atestado no próprio navegador (canvas) e devolve uma
+// string base64 pronta pra gravar direto no Firestore, sem precisar do
+// Firebase Storage. Reduz a qualidade até caber no limite de 1MB por
+// documento do Firestore.
+function comprimirImagemAtestado(arquivo) {
+  return new Promise((resolve, reject) => {
+    if (!arquivo.type.startsWith("image/")) {
+      reject(new Error("O atestado precisa ser uma foto (jpg, png, etc.)"));
+      return;
+    }
+    const leitor = new FileReader();
+    leitor.onerror = () => reject(new Error("Não foi possível ler a foto do atestado"));
+    leitor.onload = () => {
+      const imagem = new Image();
+      imagem.onerror = () => reject(new Error("Essa foto não pôde ser aberta, tente outra"));
+      imagem.onload = () => {
+        const larguraMaxima = 1000;
+        const escala = Math.min(1, larguraMaxima / imagem.width);
+        const largura = Math.round(imagem.width * escala);
+        const altura = Math.round(imagem.height * escala);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = largura;
+        canvas.height = altura;
+        canvas.getContext("2d").drawImage(imagem, 0, 0, largura, altura);
+
+        let qualidade = 0.7;
+        let dataUrl = canvas.toDataURL("image/jpeg", qualidade);
+        while (dataUrl.length > 700000 && qualidade > 0.3) {
+          qualidade -= 0.1;
+          dataUrl = canvas.toDataURL("image/jpeg", qualidade);
+        }
+
+        if (dataUrl.length > 700000) {
+          reject(new Error("Essa foto ainda ficou grande demais. Tente tirar de novo com menos zoom."));
+          return;
+        }
+        resolve(dataUrl);
+      };
+      imagem.src = leitor.result;
+    };
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+function prepararEntradaAtrasada() {
+  const sessao = Sessao.obter();
+  document.getElementById("atr-nome-aluno").textContent = sessao.nome;
+  document.getElementById("atr-aluno-nome").value = sessao.nome;
+  document.getElementById("atr-aluno-ra").value = sessao.ra;
+
+  // sala e turno vêm SEMPRE do alunos.json (identificados pelo RA no
+  // login): o aluno não escolhe nem altera esses dados, só vê a sala
+  const campoTurmaAtraso = document.getElementById("atr-turma");
+  campoTurmaAtraso.value = sessao.sala || sessao.turma || "";
+  campoTurmaAtraso.readOnly = true;
+  // começa sempre em branco: nada do aluno anterior pode sobrar
+  document.getElementById("atr-motivo").value = "";
+  document.getElementById("atr-mensagem-erro").style.display = "none";
+  document.getElementById("atr-mensagem-sucesso").style.display = "none";
+  limparJustificativaAtraso();
+}
+
+(function () {
+  document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      justificativaAtrasoSelecionada = botao.dataset.justificativa;
+      document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((b) => b.classList.toggle("ativa", b === botao));
+      document.getElementById("atr-campo-responsavel").style.display = justificativaAtrasoSelecionada === "RESPONSAVEL" ? "" : "none";
+      document.getElementById("atr-campo-atestado").style.display = justificativaAtrasoSelecionada === "ATESTADO" ? "" : "none";
+    });
+  });
+
+  document.getElementById("atr-botao-sair").addEventListener("click", () => {
+    Sessao.encerrar();
+    showView("index");
+  });
+
+  const form = document.getElementById("atr-form-entrada-atrasada");
+  const mensagemErro = document.getElementById("atr-mensagem-erro");
+  const mensagemSucesso = document.getElementById("atr-mensagem-sucesso");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    mensagemErro.style.display = "none";
+
+    const sessao = Sessao.obter();
+    const turma = sessao.sala || sessao.turma || "";
+    const motivo = document.getElementById("atr-motivo").value.trim();
+
+    if (!motivo) {
+      mensagemErro.textContent = "Conte o motivo do seu atraso";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    if (!justificativaAtrasoSelecionada) {
+      mensagemErro.textContent = "Selecione se você veio com responsável ou se tem atestado";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    const responsavelNome = document.getElementById("atr-responsavel-nome").value.trim();
+    if (justificativaAtrasoSelecionada === "RESPONSAVEL" && !responsavelNome) {
+      mensagemErro.textContent = "Informe o nome do responsável";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    const atestadoArquivo = document.getElementById("atr-atestado-arquivo").files[0];
+    if (justificativaAtrasoSelecionada === "ATESTADO" && !atestadoArquivo) {
+      mensagemErro.textContent = "Anexe uma foto do atestado";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    const botaoEnviar = form.querySelector("button[type=submit]");
+    const textoOriginalBotao = botaoEnviar.textContent;
+    botaoEnviar.disabled = true;
+
+    let atestadoBase64 = null;
+    let atestadoNomeArquivo = null;
+
+    try {
+      if (justificativaAtrasoSelecionada === "ATESTADO") {
+        botaoEnviar.textContent = "Comprimindo foto...";
+        atestadoBase64 = await comprimirImagemAtestado(atestadoArquivo);
+        atestadoNomeArquivo = atestadoArquivo.name;
+      }
+    } catch (erro) {
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      botaoEnviar.disabled = false;
+      botaoEnviar.textContent = textoOriginalBotao;
+      return;
+    }
+
+    botaoEnviar.textContent = "Enviando...";
+
+    try {
+      await Dados.criarEntradaAtrasada({
+        alunoId: sessao.id,
+        alunoNome: sessao.nome,
+        alunoRa: sessao.ra,
+        turma,
+        motivo,
+        justificativaTipo: justificativaAtrasoSelecionada,
+        responsavelNome,
+        atestadoBase64,
+        atestadoNomeArquivo,
+      });
+    } catch (erro) {
+      mensagemErro.textContent = erro.message;
+      mensagemErro.style.display = "block";
+      botaoEnviar.disabled = false;
+      botaoEnviar.textContent = textoOriginalBotao;
+      return;
+    }
+
+    botaoEnviar.disabled = false;
+    botaoEnviar.textContent = textoOriginalBotao;
+
+    form.reset();
+    document.getElementById("atr-aluno-nome").value = sessao.nome;
+    document.getElementById("atr-aluno-ra").value = sessao.ra;
+    document.getElementById("atr-turma").value = sessao.sala || sessao.turma || "";
+    limparJustificativaAtraso();
+
+    mensagemSucesso.style.display = "block";
+    setTimeout(() => {
+      Sessao.encerrar();
+      showView("index");
+    }, 3000);
+  });
+})();
+
+/* =====================================================================
+   TELA: PAINEL DA SECRETARIA (era painel.html)
+   Dashboard moderno com sidebar, cards, gráficos e tabelas
+   — só é alcançável depois do login de secretaria, ver VIEWS.guard
+   ===================================================================== */
+(function () {
+  document.getElementById("pn-botao-sair").addEventListener("click", () => {
+    // desliga a escuta em tempo real antes de sair: sem isso o painel
+    // continuaria recebendo snapshots (e tocando alerta) fora da tela
+    window.pararPainel();
+    Sessao.encerrar();
+    showView("index");
+  });
+
+  const ROTULO_TIPO = {
+    INDISCIPLINA: "Indisciplina",
+    ATRASO: "Atraso",
+    MATERIAL: "Sem material",
+    SAUDE: "Saúde",
+    OUTRO: "Outro",
+  };
+
+  const CORES_TIPO = {
+    INDISCIPLINA: "#5B9BFF",
+    ATRASO: "#E4A430",
+    MATERIAL: "#34C77B",
+    SAUDE: "#E5484D",
+    OUTRO: "#B9C4E0",
+  };
+
+  const ESTILO_GRAVIDADE = {
+    LEVE: "background: rgba(183,199,227,0.6); color:#1E2A45;",
+    MODERADA: "background: rgba(217,164,65,0.75); color:#1E2A45;",
+    GRAVE: "background:#B4232A; color:#fff;",
+  };
+
+  const ESTILO_STATUS = {
+    NOVA: "border-color:#C1443C; color:#9C332C;",
+    LIDA: "border-color:#D9A441; color:#1E2A45;",
+    EM_ANDAMENTO: "border-color:#3D4A66; color:#3D4A66;",
+    RESOLVIDA: "border-color:#B7C7E3; color:rgba(61,74,102,0.6);",
+  };
+
+  function formatarHora(iso) {
+    const d = new Date(iso);
+    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function formatarDataCurta(iso) {
+    const d = new Date(iso);
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  }
+
+  function escapar(texto) {
+    return String(texto ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function ehMesmoDia(iso, dataRef) {
+    const d = new Date(iso);
+    return d.getFullYear() === dataRef.getFullYear() &&
+           d.getMonth() === dataRef.getMonth() &&
+           d.getDate() === dataRef.getDate();
+  }
+
+  // cada seção do painel tem o seu próprio filtro, para que trocar o
+  // filtro em "Ocorrências" não mude o que aparece em "Entradas atrasadas"
+  let filtroOcorrencias = "abertas"; // "abertas" | "todas"
+  let filtroAtrasos = "abertas"; // "abertas" | "todas"
+
+  /* ---------------------------------------------------------------
+     DADOS DO PAINEL
+     ---------------------------------------------------------------
+     Agora as listas vêm do SERVIDOR (GET /ocorrencias e GET /atrasos)
+     e ficam guardadas nestas duas variáveis. Toda vez que o painel
+     precisa se desenhar, primeiro ele atualiza as duas com
+     carregarDados() e só depois desenha (é o que renderizar() faz).
+     Assim cards, gráficos e tabelas usam sempre a mesma "foto" dos
+     dados, sem disparar uma consulta por gráfico/tabela.
+     --------------------------------------------------------------- */
+  let ocorrenciasDoPainel = [];
+  let atrasosDoPainel = [];
+
+  async function carregarDados() {
+    const [ocorrencias, atrasos] = await Promise.all([
+      Dados.listarOcorrencias(),
+      Dados.listarEntradasAtrasadas(),
+    ]);
+    ocorrenciasDoPainel = ocorrencias;
+    atrasosDoPainel = atrasos;
+  }
+
+  let idsConhecidosOcorrencias = new Set();
+  let idsConhecidosAtrasos = new Set();
+  let primeiraRenderizacaoOcorrencias = true;
+  let primeiraRenderizacaoAtrasos = true;
+
+  /* ---------------------------------------------------------------
+     NAVEGAÇÃO DA SIDEBAR
+     --------------------------------------------------------------- */
+  function alternarPainel(nome) {
+    document.querySelectorAll(".sidebar-item[data-painel]").forEach((b) => b.classList.remove("ativo"));
+    document.querySelector(`.sidebar-item[data-painel="${nome}"]`)?.classList.add("ativo");
+
+    document.getElementById("pn-secao-dashboard").style.display = nome === "dashboard" ? "" : "none";
+    document.getElementById("pn-secao-ocorrencias").style.display = nome === "ocorrencias" ? "" : "none";
+    document.getElementById("pn-secao-atrasos").style.display = nome === "atrasos" ? "" : "none";
+  }
+
+  window.alternarPainel = alternarPainel;
+
+  document.querySelectorAll(".sidebar-item[data-painel]").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      alternarPainel(botao.dataset.painel);
+      // troca de seção não cria entrada no "voltar", só atualiza a URL
+      atualizarUrl("painel", botao.dataset.painel, true);
+    });
+  });
+
+  /* ---------------------------------------------------------------
+     DASHBOARD — CARDS DE ESTATÍSTICAS
+     --------------------------------------------------------------- */
+  function renderizarCards() {
+    const hoje = new Date();
+    const ocorrencias = ocorrenciasDoPainel;
+    const atrasos = atrasosDoPainel;
+
+    const ocorrenciasHoje = ocorrencias.filter((o) => ehMesmoDia(o.criadaEm, hoje)).length;
+    const atrasosHoje = atrasos.filter((a) => ehMesmoDia(a.criadaEm, hoje)).length;
+
+    const totalAlunos = Dados.listarAlunos().length;
+    const alunosComOcorrencia = new Set(ocorrencias.map((o) => o.alunoRa)).size;
+    const alunosSemOcorrencia = Math.max(0, totalAlunos - alunosComOcorrencia);
+    const percentualSemOcorrencia = totalAlunos > 0
+      ? Math.round((alunosSemOcorrencia / totalAlunos) * 100)
+      : 0;
+
+    document.getElementById("pn-stat-ocorrencias-hoje").textContent = ocorrenciasHoje;
+    document.getElementById("pn-stat-atrasos-hoje").textContent = atrasosHoje;
+    document.getElementById("pn-stat-total-alunos").textContent = totalAlunos;
+    document.getElementById("pn-stat-sem-ocorrencia").textContent = `${percentualSemOcorrencia}%`;
+  }
+
+  /* ---------------------------------------------------------------
+     DASHBOARD — GRÁFICO DE OCORRÊNCIAS (SEMANA ATUAL: SEGUNDA A DOMINGO)
+     ================================================================
+     Mesma estrutura visual do gráfico "Entradas atrasadas · semana
+     atual (segunda a domingo)" (barras), mas usando como fonte os
+     registros de ocorrências: conta quantas ocorrências foram
+     registradas em cada dia da semana atual (segunda a domingo). Os
+     números mudam automaticamente quando uma nova ocorrência é
+     registrada (renderizar() é chamado pelo evento "ocorrencias:mudou"
+     e pelos botões de status da listagem).
+     --------------------------------------------------------------- */
+  function renderizarGraficoTipos() {
+    const container = document.getElementById("pn-grafico-tipos");
+    const ocorrencias = ocorrenciasDoPainel;
+
+    // 7 barras fixas: segunda a domingo da semana atual
+    const segunda = Dados.inicioDaSemana();
+    const dias = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(segunda);
+      d.setDate(segunda.getDate() + i);
+      return d;
+    });
+
+    const contagem = dias.map((dia) => ({
+      dia,
+      rotulo: dia.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", ""),
+      total: ocorrencias.filter((o) => ehMesmoDia(o.criadaEm, dia)).length,
+    }));
+
+    const maximo = Math.max(1, ...contagem.map((c) => c.total));
+
+    container.innerHTML = contagem.map((c) => `
+      <div class="barra-coluna">
+        <span class="barra-valor">${c.total}</span>
+        <div class="barra-preenchimento" style="height:${Math.max(4, (c.total / maximo) * 100)}%; background:var(--amber);"></div>
+        <span class="barra-rotulo">${c.rotulo}</span>
+      </div>
+    `).join("");
+  }
+
+  /* ---------------------------------------------------------------
+     DASHBOARD — GRÁFICO DE ENTRADAS ATRASADAS (SEMANA ATUAL: SEGUNDA A DOMINGO)
+     --------------------------------------------------------------- */
+  function renderizarGraficoAtrasos() {
+    const container = document.getElementById("pn-grafico-atrasos");
+    const atrasos = atrasosDoPainel;
+
+    // 7 barras fixas: segunda a domingo da semana atual
+    const segunda = Dados.inicioDaSemana();
+    const dias = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(segunda);
+      d.setDate(segunda.getDate() + i);
+      return d;
+    });
+
+    const contagem = dias.map((dia) => ({
+      dia,
+      rotulo: dia.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", ""),
+      total: atrasos.filter((a) => ehMesmoDia(a.criadaEm, dia)).length,
+    }));
+
+    const maximo = Math.max(1, ...contagem.map((c) => c.total));
+
+    container.innerHTML = contagem.map((c) => `
+      <div class="barra-coluna">
+        <span class="barra-valor">${c.total}</span>
+        <div class="barra-preenchimento" style="height:${Math.max(4, (c.total / maximo) * 100)}%; background:var(--amber);"></div>
+        <span class="barra-rotulo">${c.rotulo}</span>
+      </div>
+    `).join("");
+  }
+
+  /* ---------------------------------------------------------------
+     DASHBOARD — TABELA DE ÚLTIMAS OCORRÊNCIAS
+     --------------------------------------------------------------- */
+  function renderizarTabelaOcorrencias() {
+    const container = document.getElementById("pn-tabela-ocorrencias");
+    const ocorrencias = ocorrenciasDoPainel.slice(0, 5);
+
+    if (ocorrencias.length === 0) {
+      container.innerHTML = `<div class="tabela-vazio">Nenhuma ocorrência registrada ainda.</div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Aluno</th>
+            <th>Tipo</th>
+            <th>Data</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${ocorrencias.map((o) => `
+            <tr>
+              <td class="tabela-nome">${escapar(o.alunoNome)}</td>
+              <td><span class="tabela-tipo">${escapar(ROTULO_TIPO[o.tipo] || o.tipo)}</span></td>
+              <td class="tabela-hora">${formatarDataCurta(o.criadaEm)}</td>
+              <td><span class="tag-status" style="${ESTILO_STATUS[o.status] || ""}">${escapar(String(o.status ?? "").replace("_", " "))}</span></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  /* ---------------------------------------------------------------
+     DASHBOARD — TABELA DE ÚLTIMAS ENTRADAS ATRASADAS
+     --------------------------------------------------------------- */
+  function renderizarTabelaAtrasos() {
+    const container = document.getElementById("pn-tabela-atrasos");
+    const atrasos = atrasosDoPainel.slice(0, 5);
+
+    if (atrasos.length === 0) {
+      container.innerHTML = `<div class="tabela-vazio">Nenhuma entrada atrasada registrada ainda.</div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Aluno</th>
+            <th>Data</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${atrasos.map((a) => `
+            <tr>
+              <td class="tabela-nome">${escapar(a.alunoNome)}</td>
+              <td class="tabela-hora">${formatarDataCurta(a.criadaEm)}</td>
+              <td><span class="tag-status" style="${ESTILO_STATUS[a.status] || ""}">${escapar(String(a.status ?? "").replace("_", " "))}</span></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  function renderizarDashboard() {
+    renderizarCards();
+    renderizarGraficoTipos();
+    renderizarGraficoAtrasos();
+    renderizarTabelaOcorrencias();
+    renderizarTabelaAtrasos();
+  }
+
+  /* ---------------------------------------------------------------
+     LISTA DE OCORRÊNCIAS (seção completa)
+     --------------------------------------------------------------- */
+  function renderizarOcorrencias() {
+    // a "foto" dos dados já foi atualizada por carregarDados()
+    const todas = ocorrenciasDoPainel;
+    const lista = filtroOcorrencias === "abertas"
+      ? todas.filter((o) => o.status !== "RESOLVIDA")
+      : todas;
+    const container = document.getElementById("pn-lista-ocorrencias");
+
+    // detecta ocorrencias novas (lançadas em outro aparelho) para notificar
+    if (!primeiraRenderizacaoOcorrencias) {
+      todas.forEach((o) => {
+        if (!idsConhecidosOcorrencias.has(o.id)) {
+          idsConhecidosOcorrencias.add(o.id);
+          Notificacoes.tocarAlerta();
+          Notificacoes.notificar("Nova ocorrência", `${o.alunoNome} (RA ${o.alunoRa}) — ${ROTULO_TIPO[o.tipo] || o.tipo}`);
+        }
+      });
+    } else {
+      todas.forEach((o) => idsConhecidosOcorrencias.add(o.id));
+      primeiraRenderizacaoOcorrencias = false;
+    }
+
+    if (lista.length === 0) {
+      container.innerHTML = `
+        <div class="folha vazio">
+          <p class="vazio-titulo">Nenhuma ocorrência por aqui</p>
+          <p class="vazio-sub">Quando um professor enviar, ela aparece aqui na hora.</p>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = lista.map((o) => `
+      <article class="folha cartao-ocorrencia">
+        <div class="linha-topo-cartao">
+          <div>
+            <p class="nome-aluno">${escapar(o.alunoNome)}</p>
+            <p class="meta-aluno">RA ${escapar(o.alunoRa)}${o.turma ? " · Turma " + escapar(o.turma) : ""}</p>
+          </div>
+          <span class="tag-gravidade" style="${ESTILO_GRAVIDADE[o.gravidade] || ""}">${escapar(o.gravidade)}</span>
+        </div>
+
+        <div class="linha-tags">
+          <span class="tag-tipo">${escapar(ROTULO_TIPO[o.tipo] || o.tipo)}</span>
+          <span class="tag-hora">${formatarHora(o.criadaEm)} · prof(a). ${escapar(o.professorNome)}</span>
+        </div>
+
+        ${o.detalhes ? `<p class="detalhes-ocorrencia">${escapar(o.detalhes)}</p>` : ""}
+
+        <div class="linha-acoes">
+          <span class="tag-status" style="${ESTILO_STATUS[o.status] || ""}">${escapar(String(o.status ?? "").replace("_", " "))}</span>
+          <div class="acoes-direita">
+            ${o.status === "NOVA" ? `<button class="botao-mini botao-mini-clara" onclick="mudarStatusOcorrencia('${o.id}', 'LIDA')">Marcar como vista</button>` : ""}
+            ${o.status !== "RESOLVIDA" ? `<button class="botao-mini botao-mini-escura" onclick="mudarStatusOcorrencia('${o.id}', 'RESOLVIDA')">Marcar como resolvida</button>` : ""}
+          </div>
+        </div>
+      </article>
+    `).join("");
+  }
+
+  /* ---------------------------------------------------------------
+     LISTA DE ENTRADAS ATRASADAS (seção completa)
+     --------------------------------------------------------------- */
+  function renderizarAtrasos() {
+    // a "foto" dos dados já foi atualizada por carregarDados()
+    const todas = atrasosDoPainel;
+    const lista = filtroAtrasos === "abertas"
+      ? todas.filter((ent) => ent.status !== "RESOLVIDA")
+      : todas;
+    const container = document.getElementById("pn-lista-atrasos");
+
+    // detecta entradas atrasadas novas (lançadas em outro aparelho) para notificar
+    if (!primeiraRenderizacaoAtrasos) {
+      todas.forEach((ent) => {
+        if (!idsConhecidosAtrasos.has(ent.id)) {
+          idsConhecidosAtrasos.add(ent.id);
+          Notificacoes.tocarAlerta();
+          Notificacoes.notificar("Nova entrada atrasada", `${ent.alunoNome} (RA ${ent.alunoRa}) registrou um atraso`);
+        }
+      });
+    } else {
+      todas.forEach((ent) => idsConhecidosAtrasos.add(ent.id));
+      primeiraRenderizacaoAtrasos = false;
+    }
+
+    if (lista.length === 0) {
+      container.innerHTML = `
+        <div class="folha vazio">
+          <p class="vazio-titulo">Nenhuma entrada atrasada por aqui</p>
+          <p class="vazio-sub">Quando um aluno registrar um atraso, ele aparece aqui na hora.</p>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = lista.map((ent) => `
+      <article class="folha cartao-ocorrencia">
+        <div class="linha-topo-cartao">
+          <div>
+            <p class="nome-aluno">${escapar(ent.alunoNome)}</p>
+            <p class="meta-aluno">RA ${escapar(ent.alunoRa)}${ent.turma ? " · Turma " + escapar(ent.turma) : ""}</p>
+          </div>
+        </div>
+
+        <div class="linha-tags">
+          <span class="tag-tipo">Entrada atrasada</span>
+          <span class="tag-hora">${formatarHora(ent.criadaEm)}</span>
+        </div>
+
+        <p class="detalhes-ocorrencia">${escapar(ent.motivo)}</p>
+        <p class="meta-aluno" style="margin-top:4px;">
+          ${ent.justificativaTipo === "RESPONSAVEL"
+            ? `Veio com responsável: ${escapar(ent.responsavelNome || "não informado")}`
+            : ent.justificativaTipo === "ATESTADO"
+              ? `Atestado: ${ent.atestadoBase64 ? `<a href="#" onclick="verAtestado('${ent.id}'); return false;">ver foto</a>` : "anexado"}`
+              : "Sem responsável ou atestado (registro antigo)"}
+        </p>
+
+        <div class="linha-acoes">
+          <span class="tag-status" style="${ESTILO_STATUS[ent.status] || ""}">${escapar(String(ent.status ?? "").replace("_", " "))}</span>
+          <div class="acoes-direita">
+            ${ent.status === "NOVA" ? `<button class="botao-mini botao-mini-clara" onclick="mudarStatusAtraso('${ent.id}', 'LIDA')">Marcar como vista</button>` : ""}
+            ${ent.status !== "RESOLVIDA" ? `<button class="botao-mini botao-mini-escura" onclick="mudarStatusAtraso('${ent.id}', 'RESOLVIDA')">Marcar como resolvida</button>` : ""}
+          </div>
+        </div>
+      </article>
+    `).join("");
+  }
+
+  // atualiza as listas no servidor e redesenha o painel inteiro.
+  // Agora é async porque GET /ocorrencias e GET /atrasos são chamadas
+  // de rede: quem chama sem await (nos listeners de evento) só perde
+  // a espera, o desenho continua acontecendo normalmente.
+  async function renderizar() {
+    try {
+      await carregarDados();
+    } catch (erro) {
+      console.error("Não foi possível carregar os dados do painel.", erro);
+    }
+    renderizarOcorrencias();
+    renderizarAtrasos();
+    renderizarDashboard();
+  }
+
+  // os botões "marcar como vista/resolvida" agora gravam no SERVIDOR
+  // (PATCH /ocorrencias/:id e PATCH /atrasos/:id) antes de redesenhar
+  window.mudarStatusOcorrencia = async function (id, status) {
+    try {
+      await Dados.atualizarStatus(id, status);
+    } catch (erro) {
+      console.error("Não foi possível mudar o status da ocorrência.", erro);
+    }
+    renderizar();
+  };
+
+  window.mudarStatusAtraso = async function (id, status) {
+    try {
+      await Dados.atualizarStatusEntradaAtrasada(id, status);
+    } catch (erro) {
+      console.error("Não foi possível mudar o status da entrada atrasada.", erro);
+    }
+    renderizar();
+  };
+
+  // abre a foto do atestado numa aba nova. Não usamos <a href="data:...">
+  // direto porque o Chrome bloqueia navegar pra uma URL base64 por
+  // segurança — em vez disso abrimos uma aba em branco e desenhamos a
+  // imagem dentro dela.
+  window.verAtestado = function (id) {
+    const entrada = atrasosDoPainel.find((e) => e.id === id);
+    if (!entrada || !entrada.atestadoBase64) return;
+    const janela = window.open("", "_blank");
+    if (!janela) {
+      alert("Seu navegador bloqueou a abertura da aba. Permita pop-ups para este site e tente de novo.");
+      return;
+    }
+    janela.document.write(`
+      <title>Atestado</title>
+      <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <img src="${entrada.atestadoBase64}" style="max-width:100%;max-height:100vh;" />
+      </body>
+    `);
+    janela.document.close();
+  };
+
+  document.querySelectorAll(".filtro-btn").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      // cada seção tem o seu próprio grupo de botões: descobrimos a qual
+      // seção o botão clicado pertence para (1) destacar só ele dentro
+      // dessa seção e (2) mexer apenas no filtro dessa seção
+      const secao = botao.closest(".painel-secao");
+
+      // remove o "ativo" apenas dos botões da MESMA seção, para não
+      // apagar o destaque do filtro escolhido na outra seção
+      if (secao) {
+        secao.querySelectorAll(".filtro-btn").forEach((b) => b.classList.remove("ativo"));
+      }
+      botao.classList.add("ativo");
+
+      // atualiza somente o filtro da seção do botão clicado
+      if (secao && secao.id === "pn-secao-ocorrencias") {
+        filtroOcorrencias = botao.dataset.filtro;
+      } else if (secao && secao.id === "pn-secao-atrasos") {
+        filtroAtrasos = botao.dataset.filtro;
+      }
+
+      renderizar();
+    });
+  });
+
+  document.getElementById("pn-botao-notificacao").addEventListener("click", async () => {
+    const botao = document.getElementById("pn-botao-notificacao");
+    botao.textContent = "🔔 Ativando...";
+    let token = null;
+    try {
+      token = await ativarPush();
+    } catch (erro) {
+      console.error("Não foi possível ativar as notificações push.", erro);
+    }
+    botao.textContent = token ? "🔔 Notificações ativas" : "Permissão negada";
+  });
+
+  // A lista de alunos (GET /alunos) também vem do servidor: quando ela
+  // chegar, os cards de "total de alunos" precisam ser recalculados.
+  window.addEventListener("alunos:carregados", () => renderizarCards());
+
+  /* ---------------------------------------------------------------
+     LIGAR / DESLIGAR O PAINEL
+     ---------------------------------------------------------------
+     Antes a escuta em tempo real e o primeiro desenho aconteciam ao
+     abrir o site, para qualquer visitante. Agora isso só acontece
+     quando a secretaria ENTRA no painel (VIEWS.painel.aoEntrar) e é
+     desligado no botão "Sair". Assim o alerta sonoro e a notificação
+     só tocam para registro NOVO que chegar com o painel aberto: nunca
+     ao abrir, porque o primeiro desenho apenas marca o que já existia.
+     --------------------------------------------------------------- */
+  let cancelarEscutaOcorrencias = null;
+  let cancelarEscutaAtrasos = null;
+
+  window.iniciarPainel = function () {
+    // zera o controle do que "já era conhecido": o primeiro desenho
+    // desta entrada marca tudo o que já existe, sem tocar alerta
+    idsConhecidosOcorrencias = new Set();
+    idsConhecidosAtrasos = new Set();
+    primeiraRenderizacaoOcorrencias = true;
+    primeiraRenderizacaoAtrasos = true;
+
+    // se a escuta já estivesse ligada, desliga antes de religar
+    // (evita dois onSnapshot abertos ao mesmo tempo)
+    if (cancelarEscutaOcorrencias) cancelarEscutaOcorrencias();
+    if (cancelarEscutaAtrasos) cancelarEscutaAtrasos();
+
+    // guarda as duas funções de cancelar (unsubscribe do onSnapshot)
+    cancelarEscutaOcorrencias = Dados.aoMudar(renderizar);
+    cancelarEscutaAtrasos = Dados.aoMudarEntradasAtrasadas(renderizar);
+
+    renderizar();
+
+    // se a permissão de notificação já foi concedida antes, reativa o
+    // push (registra o service worker e atualiza o token) sem pedir de novo
+    if ("Notification" in window && Notification.permission === "granted") {
+      ativarPush().catch((erro) =>
+        console.error("Não foi possível reativar as notificações push.", erro)
+      );
+    }
+  };
+
+  window.pararPainel = function () {
+    if (cancelarEscutaOcorrencias) {
+      cancelarEscutaOcorrencias();
+      cancelarEscutaOcorrencias = null;
+    }
+    if (cancelarEscutaAtrasos) {
+      cancelarEscutaAtrasos();
+      cancelarEscutaAtrasos = null;
+    }
+    // limpa as variáveis de controle para a próxima entrada no painel
+    idsConhecidosOcorrencias = new Set();
+    idsConhecidosAtrasos = new Set();
+    primeiraRenderizacaoOcorrencias = true;
+    primeiraRenderizacaoAtrasos = true;
+  };
+})();
+
+/* =====================================================================
+   TELA: GERAR QR CODE (era qrcode.html)
+   ===================================================================== */
+let qrcodeGerado = false;
+function prepararQrCode() {
+  const campoUrl = document.getElementById("qr-url");
+  if (!qrcodeGerado) {
+    // por padrao sugere o endereco atual deste arquivo (index.html);
+    // troque pelo IP do computador na rede da escola, ou pelo endereco
+    // final quando publicar o site
+    campoUrl.value = window.location.href.split("#")[0];
+    campoUrl.addEventListener("input", gerarQrCode);
+    qrcodeGerado = true;
+  }
+  gerarQrCode();
+}
+
+function gerarQrCode() {
+  const campoUrl = document.getElementById("qr-url");
+  const alvo = document.getElementById("qr-qrcode-canvas");
+  alvo.innerHTML = "";
+  new QRCode(alvo, {
+    text: campoUrl.value,
+    width: 220,
+    height: 220,
+    colorDark: "#1E2A45",
+    colorLight: "#ffffff",
+  });
+}
+
+// o app.js agora é um módulo (type="module" no index.html): funções
+// chamadas direto pelo HTML (onclick="...") precisam ficar globais,
+// como eram quando o arquivo era um script clássico.
+window.showView = showView;
+
+// F5 / link direto: abre a tela indicada na URL (ou o portal, se não houver)
+(function iniciarRoteador() {
+  const { view, sub } = lerUrl();
+  showView(view, { sub, historico: "replace" });
+
+  // botão voltar / avançar do navegador
+  window.addEventListener("popstate", () => {
+    const { view, sub } = lerUrl();
+    showView(view, { sub, historico: "nenhum" });
+  });
+})();
