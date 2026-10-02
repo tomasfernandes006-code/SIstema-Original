@@ -2,3 +2,5 @@ node_modules/
 servidor/banco.db
 __temp_a.js
 __temp_refmap.js
+supabase/.temp/
+.firebase/
