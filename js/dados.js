@@ -1,25 +1,21 @@
 import { supabase } from "./supabase-config.js";
 
 /* =====================================================================
-   CAMADA DE DADOS (SIMULADA)
+   CAMADA DE DADOS (SUPABASE)
    ---------------------------------------------------------------------
-   AVISO IMPORTANTE:
-   Isso NÃO é um banco de dados de verdade. É só o localStorage do
-   navegador, então:
-     - só funciona DENTRO DO MESMO NAVEGADOR/computador
-     - o celular do professor e o computador da secretaria NÃO veem
-       os dados um do outro (cada aparelho tem seu próprio localStorage)
-     - se limpar os dados do navegador, perde tudo
+   ONDE OS DADOS MORAM HOJE:
+     - alunos e professores vêm dos arquivos alunos.json e
+       professores.json (ver as seções logo abaixo);
+     - ocorrências e entradas atrasadas ficam nas tabelas "ocorrencias"
+       e "atrasos" do Supabase, e os atestados no Storage (bucket
+       "atestados");
+     - a conferência de senha e a troca de senha são feitas DENTRO do
+       banco, pelas funções verificar_senha e trocar_senha (chamadas
+       por RPC em autenticarAluno / autenticarProfessor), então o hash
+       das senhas nunca passa pelo navegador.
 
-   Isso serve pra você testar o fluxo completo sozinho, no mesmo
-   computador, abrindo abas diferentes.
-
-   Para funcionar de verdade entre aparelhos diferentes, os dados
-   precisam morar num servidor compartilhado (backend + banco real).
-   Todas as funções abaixo foram escritas com nomes e formatos que
-   IMITAM uma API, então quando o backend existir, basta trocar o
-   "corpo" de cada função por uma chamada fetch(...) — o resto do
-   site (as telas) não precisa mudar nada.
+   Todas as funções abaixo têm nomes e formatos de API, então quem
+   consome os dados (as telas) não precisa saber de onde eles vêm.
    ===================================================================== */
 
 const CHAVE_OCORRENCIAS = "livro-ocorrencias:dados";
@@ -85,8 +81,8 @@ let promessaAlunos = null;    // controla a leitura (evita ler o arquivo 2x)
 
    Para adicionar, remover ou corrigir um professor, edite SOMENTE o
    professores.json — o login relê o arquivo a cada tentativa, então a
-   mudança já vale na hora, sem precisar reiniciar o sistema. (Se
-   estiver usando o servidor em servidor/, ele lê este mesmo arquivo.)
+   mudança já vale na hora, sem precisar reiniciar o sistema. O site lê
+   este arquivo direto, sem backend no meio (GitHub Pages / Live Server).
    --------------------------------------------------------------------- */
 const ARQUIVO_PROFESSORES = "professores.json";
 
@@ -108,10 +104,11 @@ function comoTexto(valor) {
 }
 
 // O hash SHA-256 das senhas saiu daqui: ele era calculado no navegador
-// (crypto.subtle) e comparado com o campo "senhaHash" do Firestore. Agora
-// a conferência é feita dentro do banco, pela função verificar_senha
-// chamada em autenticarAluno/autenticarProfessor, e a gravação de uma nova
-// senha pela função trocar_senha — o hash nunca passa pelo navegador.
+// (crypto.subtle) e comparado com o campo "senhaHash" gravado no banco.
+// Agora a conferência é feita dentro do Supabase, pela função
+// verificar_senha (ver autenticarAluno/autenticarProfessor), e a gravação
+// de uma nova senha pela função trocar_senha — o hash nunca passa pelo
+// navegador.
 
 // aplica as validações em cada aluno lido do arquivo:
 //   - RA não pode ficar vazio e não pode repetir
@@ -473,9 +470,9 @@ function limiteDeRetencaoISO() {
 }
 
 // Converte uma linha da tabela "ocorrencias" (colunas em snake_case) para o
-// formato usado pelas telas (camelCase), igual ao que o Firestore devolvia
-// antes. As datas são normalizadas com new Date(x).toISOString(), porque o
-// resto do sistema compara "criadaEm" como texto (ver limiteDeRetencaoISO).
+// formato usado pelas telas (camelCase). As datas são normalizadas com
+// new Date(x).toISOString(), porque o resto do sistema compara "criadaEm"
+// como texto (ver limiteDeRetencaoISO).
 function deLinhaOcorrencia(linha) {
   const ocorrencia = {
     id: linha.id,

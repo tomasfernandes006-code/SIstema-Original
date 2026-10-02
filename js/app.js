@@ -26,12 +26,12 @@ const VIEWS = {
 
   // troca de senha do aluno: não tem "guard" porque não depende de
   // sessão — o próprio formulário pede o RA e a senha atual, que são
-  // conferidos no servidor por Dados.trocarSenhaAluno
+  // conferidos no banco por Dados.trocarSenhaAluno
   "aluno-trocar-senha": { aoEntrar: () => limparTela("aluno-trocar-senha") },
 
   // troca de senha do professor: não tem "guard" porque não depende de
   // sessão — o próprio formulário pede o RA e a senha atual, que são
-  // conferidos no servidor por Dados.trocarSenhaProfessor
+  // conferidos no banco por Dados.trocarSenhaProfessor
   "professor-trocar-senha": { aoEntrar: () => limparTela("professor-trocar-senha") },
 
   "secretaria-login": { aoEntrar: () => limparTela("secretaria-login") },
@@ -57,8 +57,8 @@ const VIEWS = {
   "painel": {
     guard: () => Sessao.obter()?.tipo === "SECRETARIA",
     guardRedirect: "secretaria-login",
-    // entrada no painel: liga a escuta em tempo real (onSnapshot) e faz
-    // o primeiro desenho do painel (ver window.iniciarPainel)
+    // entrada no painel: liga a escuta em tempo real (canal do Supabase)
+    // e faz o primeiro desenho do painel (ver window.iniciarPainel)
     aoEntrar: (sub) => {
       window.iniciarPainel();
       window.alternarPainel(sub);
@@ -185,10 +185,10 @@ function showView(id, { sub = null, historico = "push" } = {}) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    // O acesso do aluno é conferido no SERVIDOR (POST /login/aluno): o
-    // RA precisa existir na lista de alunos do servidor (que devolve
-    // sozinho o nome, a sala e o turno) e a senha precisa ser
-    // exatamente "@Coronel2026".
+    // O acesso do aluno é conferido pelo banco: o RA precisa existir no
+    // alunos.json (que fornece sozinho o nome, a sala e o turno) e a
+    // senha é validada no Supabase, pela função verificar_senha (que
+    // resolve entre a senha própria do aluno e a senha padrão).
     // RA inexistente ou senha errada = login bloqueado.
     const ra = document.getElementById("al-ra").value.trim();
     const senha = document.getElementById("al-senha").value;
@@ -229,8 +229,8 @@ function showView(id, { sub = null, historico = "push" } = {}) {
    TELA: TROCAR SENHA DO ALUNO (ver view "aluno-trocar-senha")
    Chega aqui pelo link "Trocar senha" da tela de login do aluno.
    A conferência da senha atual e a gravação da nova senha acontecem no
-   servidor: é o Dados.trocarSenhaAluno que confere o RA + a senha atual
-   e grava o hash da nova senha em senhasAlunos/{RA} (Firestore).
+   banco: é o Dados.trocarSenhaAluno que confere o RA + a senha atual e
+   grava o hash da nova senha no Supabase, pela função trocar_senha.
    ===================================================================== */
 (function () {
   const form = document.getElementById("ats-form-trocar-senha");
@@ -269,7 +269,7 @@ function showView(id, { sub = null, historico = "push" } = {}) {
       return;
     }
 
-    // ---- 2) confere a senha atual e grava a nova no servidor ----
+    // ---- 2) confere a senha atual e grava a nova no banco (Supabase) ----
     // (se a senha atual estiver errada ou o RA não existir, o erro é
     // "senha atual incorreta" — ver Dados.trocarSenhaAluno)
     try {
@@ -293,8 +293,8 @@ function showView(id, { sub = null, historico = "push" } = {}) {
    TELA: TROCAR SENHA DO PROFESSOR (ver view "professor-trocar-senha")
    Chega aqui pelo link "Trocar senha" da tela de login do professor.
    A conferência da senha atual e a gravação da nova senha acontecem no
-   servidor: é o Dados.trocarSenhaProfessor que confere o RA + a senha
-   atual e grava o hash da nova senha em senhasProfessores/{RA} (Firestore).
+   banco: é o Dados.trocarSenhaProfessor que confere o RA + a senha atual
+   e grava o hash da nova senha no Supabase, pela função trocar_senha.
    ===================================================================== */
 (function () {
   const form = document.getElementById("pts-form-trocar-senha");
@@ -333,7 +333,7 @@ function showView(id, { sub = null, historico = "push" } = {}) {
       return;
     }
 
-    // ---- 2) confere a senha atual e grava a nova no servidor ----
+    // ---- 2) confere a senha atual e grava a nova no banco (Supabase) ----
     // (se a senha atual estiver errada ou o RA não existir, o erro é
     // "senha atual incorreta" — ver Dados.trocarSenhaProfessor)
     try {
@@ -360,8 +360,9 @@ function showView(id, { sub = null, historico = "push" } = {}) {
   const form = document.getElementById("sl-form-login");
   const mensagemErro = document.getElementById("sl-mensagem-erro");
 
-  // o login agora é conferido no SERVIDOR (POST /login/secretaria), então
-  // o envio do formulário precisa esperar a resposta (async / await)
+  // o login da secretaria é conferido aqui mesmo, na lista USUARIOS do
+  // dados.js (sem consulta de rede: o USUARIOS é fixo no código); o
+  // handler continua async como os outros formulários
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const usuario = document.getElementById("sl-usuario").value.trim();
@@ -401,7 +402,7 @@ function prepararNovaOcorrencia() {
   // recomeça o seletor em 3 etapas (turno -> sala -> aluno) do zero
   // toda vez que a tela é aberta
   if (window.prepararSeletorAlunos) window.prepararSeletorAlunos();
-  // relê a lista de alunos no servidor (GET /alunos): quando ela chegar,
+  // manda reler a lista de alunos do alunos.json: quando ela chegar,
   // o evento "alunos:carregados" (lá embaixo) remonta o seletor
   Dados.carregarAlunos();
 }
@@ -554,7 +555,7 @@ function prepararNovaOcorrencia() {
   // do zero sempre que a tela de nova ocorrência for aberta
   window.prepararSeletorAlunos = prepararSeletorAlunos;
 
-  // quando a lista de alunos chegar do servidor (GET /alunos), se o
+  // quando a lista de alunos do alunos.json chegar, se o
   // professor ainda não escolheu nada, o seletor é montado com ela
   window.addEventListener("alunos:carregados", () => {
     if (!seletorTurno.value) prepararSeletorAlunos();
@@ -579,8 +580,8 @@ function prepararNovaOcorrencia() {
       return;
     }
 
-    // a ocorrência agora é gravada no SERVIDOR (POST /ocorrencias):
-    // o formulário só é limpo depois que o servidor confirmar
+    // a ocorrência agora é gravada no Supabase (tabela "ocorrencias"):
+    // o formulário só é limpo depois que o banco confirmar
     try {
       await Dados.criarOcorrencia({
         professorId: sessao.id,
@@ -838,7 +839,7 @@ function prepararEntradaAtrasada() {
   /* ---------------------------------------------------------------
      DADOS DO PAINEL
      ---------------------------------------------------------------
-     Agora as listas vêm do SERVIDOR (GET /ocorrencias e GET /atrasos)
+     Agora as listas vêm do Supabase (tabelas "ocorrencias" e "atrasos")
      e ficam guardadas nestas duas variáveis. Toda vez que o painel
      precisa se desenhar, primeiro ele atualiza as duas com
      carregarDados() e só depois desenha (é o que renderizar() faz).
@@ -1188,10 +1189,11 @@ function prepararEntradaAtrasada() {
     `).join("");
   }
 
-  // atualiza as listas no servidor e redesenha o painel inteiro.
-  // Agora é async porque GET /ocorrencias e GET /atrasos são chamadas
-  // de rede: quem chama sem await (nos listeners de evento) só perde
-  // a espera, o desenho continua acontecendo normalmente.
+  // atualiza as listas (tabelas "ocorrencias" e "atrasos" do Supabase) e
+  // redesenha o painel inteiro.
+  // Agora é async porque essas consultas são chamadas de rede: quem chama
+  // sem await (nos listeners de evento) só perde a espera, o desenho
+  // continua acontecendo normalmente.
   async function renderizar() {
     try {
       await carregarDados();
@@ -1203,8 +1205,8 @@ function prepararEntradaAtrasada() {
     renderizarDashboard();
   }
 
-  // os botões "marcar como vista/resolvida" agora gravam no SERVIDOR
-  // (PATCH /ocorrencias/:id e PATCH /atrasos/:id) antes de redesenhar
+  // os botões "marcar como vista/resolvida" agora gravam no Supabase
+  // (update da coluna "status" da linha) antes de redesenhar
   window.mudarStatusOcorrencia = async function (id, status) {
     try {
       await Dados.atualizarStatus(id, status);
@@ -1274,8 +1276,8 @@ function prepararEntradaAtrasada() {
         : "Erro ao ativar (veja o console)";
   });
 
-  // A lista de alunos (GET /alunos) também vem do servidor: quando ela
-  // chegar, os cards de "total de alunos" precisam ser recalculados.
+  // A lista de alunos também vem de fora do código (alunos.json): quando
+  // ela chegar, os cards de "total de alunos" precisam ser recalculados.
   window.addEventListener("alunos:carregados", () => renderizarCards());
 
   /* ---------------------------------------------------------------
@@ -1300,11 +1302,11 @@ function prepararEntradaAtrasada() {
     primeiraRenderizacaoAtrasos = true;
 
     // se a escuta já estivesse ligada, desliga antes de religar
-    // (evita dois onSnapshot abertos ao mesmo tempo)
+    // (evita dois canais de tempo real abertos ao mesmo tempo)
     if (cancelarEscutaOcorrencias) cancelarEscutaOcorrencias();
     if (cancelarEscutaAtrasos) cancelarEscutaAtrasos();
 
-    // guarda as duas funções de cancelar (unsubscribe do onSnapshot)
+    // guarda as duas funções de cancelar (cancelamento dos canais)
     cancelarEscutaOcorrencias = Dados.aoMudar(renderizar);
     cancelarEscutaAtrasos = Dados.aoMudarEntradasAtrasadas(renderizar);
 
