@@ -1,52 +1,82 @@
-// Módulo de notificações push (Firebase Cloud Messaging).
-// Responsabilidade única: pedir permissão, registrar o service worker,
-// obter o token do FCM e guardar esse token no Firestore para que o
-// servidor possa mandar as notificações para a secretaria.
-import { db, messaging } from "./firebase-config.js";
-import { getToken } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging.js";
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+// Módulo de notificações push (Web Push padrão, sem Firebase).
+// Responsabilidade única: pedir permissão, registrar o service worker
+// (sw.js), criar a inscrição push do navegador com a chave VAPID pública e
+// guardar essa inscrição no Supabase para que o servidor possa mandar as
+// notificações para a secretaria.
+import { supabase } from "./supabase-config.js";
 
-// Chave pública VAPID (Web Push) do projeto Firebase:
-// Console do Firebase > Configurações do projeto > Cloud Messaging >
-// "Web Push certificates" > copie a chave e cole aqui.
-const VAPID_KEY = "COLE_AQUI_A_SUA_VAPID_KEY";
+// Chave pública VAPID (Web Push) do servidor que envia as notificações.
+// A chave privada correspondente fica só no servidor, nunca aqui no site.
+const VAPID_PUBLICA = "BLV1uRb7i-YTboiP_EnfKrMsCl3NJvFSa7ydufJ0TKD8SSFa9c9jzaKYoTb1LR4TGmY-GeosheJUN-Z5phxQnAQ";
+
+// converte a chave VAPID de base64url (formato em que ela é publicada) para
+// o Uint8Array que o pushManager.subscribe espera em applicationServerKey
+function converterChaveBase64Url(chave) {
+  const preenchimento = "=".repeat((4 - (chave.length % 4)) % 4);
+  const base64 = (chave + preenchimento).replace(/-/g, "+").replace(/_/g, "/");
+  const binario = atob(base64);
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i += 1) {
+    bytes[i] = binario.charCodeAt(i);
+  }
+  return bytes;
+}
 
 /**
  * Ativa as notificações push para a secretaria:
  *   1) pede a permissão de notificação no navegador;
- *   2) registra o service worker firebase-messaging-sw.js;
- *   3) obtém o token do FCM com getToken(messaging, { vapidKey });
- *   4) grava o token na coleção "tokensPush" (id do documento = token).
- * Devolve o token (string) em caso de sucesso, ou null se algo impedir.
+ *   2) registra o service worker sw.js na raiz (scope "/");
+ *   3) cria a inscrição push deste navegador (pushManager.subscribe);
+ *   4) grava/atualiza a inscrição na tabela "push_subscriptions" do
+ *      Supabase, usando o endpoint como chave (onConflict "endpoint").
+ * Devolve o endpoint (string) em caso de sucesso, ou null se algo impedir.
  */
 export async function ativarPush() {
-  if (!("Notification" in window) || !("serviceWorker" in navigator)) return null;
+  if (
+    !("Notification" in window) ||
+    !("serviceWorker" in navigator) ||
+    !("PushManager" in window)
+  ) {
+    return null;
+  }
 
-  // 1) permissão do navegador
-  const permissao = await Notification.requestPermission();
-  if (permissao !== "granted") return null;
+  try {
+    // 1) permissão do navegador
+    const permissao = await Notification.requestPermission();
+    if (permissao !== "granted") return null;
 
-  // sem instância de messaging (ambiente sem suporte) não há o que fazer
-  if (!messaging) return null;
+    // 2) service worker na raiz (mesmo escopo do app)
+    const registro = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
 
-  // 2) registra o service worker na raiz (mesmo escopo do app)
-  const registro = await navigator.serviceWorker.register("/firebase-messaging-sw.js", {
-    scope: "/",
-  });
+    // 3) inscrição push deste dispositivo/navegador
+    const assinatura = await registro.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: converterChaveBase64Url(VAPID_PUBLICA),
+    });
 
-  // 3) token do FCM para este dispositivo/navegador
-  const token = await getToken(messaging, {
-    vapidKey: VAPID_KEY,
-    serviceWorkerRegistration: registro,
-  });
-  if (!token) return null;
+    const endpoint = assinatura.endpoint;
 
-  // 4) grava/atualiza no Firestore: id do documento = token
-  await setDoc(doc(db, "tokensPush", token), {
-    token,
-    tipo: "SECRETARIA",
-    atualizadoEm: new Date().toISOString(),
-  });
+    // 4) grava/atualiza no Supabase: o endpoint identifica o dispositivo
+    const { error } = await supabase
+      .from("push_subscriptions")
+      .upsert(
+        {
+          endpoint,
+          subscription: assinatura.toJSON(),
+          atualizado_em: new Date().toISOString(),
+        },
+        { onConflict: "endpoint" }
+      );
 
-  return token;
+    if (error) {
+      console.error("Não foi possível salvar a inscrição push no Supabase.", error);
+      return null;
+    }
+
+    return endpoint;
+  } catch (erro) {
+    // navegador sem suporte, service worker bloqueado, push desligado etc.
+    console.error("Não foi possível ativar as notificações push.", erro);
+    return null;
+  }
 }

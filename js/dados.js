@@ -515,6 +515,14 @@ function deLinhaAtraso(linha) {
   if (linha.atualizada_em) {
     entrada.atualizadaEm = new Date(linha.atualizada_em).toISOString();
   }
+  // o atestado mora no Supabase Storage (bucket público "atestados") e a
+  // coluna guarda só o CAMINHO do arquivo: a URL pública é montada aqui
+  // para a tela poder abrir a foto/PDF sem saber nada sobre o Storage
+  if (linha.atestado_path) {
+    entrada.atestadoUrl = supabase.storage
+      .from("atestados")
+      .getPublicUrl(linha.atestado_path).data.publicUrl;
+  }
   return entrada;
 }
 
@@ -570,6 +578,73 @@ async function lerEntradasAtrasadas() {
 // mesmo esquema do "ocorrencias:mudou": evento próprio pra esta aba
 function avisarMudancaEntradasAtrasadas() {
   window.dispatchEvent(new CustomEvent("entradas-atrasadas:mudou"));
+}
+
+/* ---------------------------------------------------------------------
+   ANEXO DO ATESTADO (Supabase Storage, bucket público "atestados")
+   ---------------------------------------------------------------------
+   O arquivo escolhido no formulário (foto ou PDF) sobe para o bucket e o
+   que fica guardado no banco é só o CAMINHO dele (coluna atestado_path).
+   A URL pública é montada depois, em deLinhaAtraso, a partir do caminho.
+   --------------------------------------------------------------------- */
+
+// extensão do arquivo (sem o ponto, em minúsculas). Usa o tipo MIME como
+// reserva quando o nome do arquivo não traz uma extensão utilizável.
+function extensaoDoAtestado(arquivo) {
+  const partes = String(arquivo.name || "").split(".");
+  const doNome = partes.length > 1 ? partes.pop().toLowerCase() : "";
+  if (/^[a-z0-9]{2,5}$/.test(doNome)) return doNome;
+  if (arquivo.type === "application/pdf") return "pdf";
+  if (arquivo.type === "image/png") return "png";
+  if (arquivo.type === "image/webp") return "webp";
+  return "jpg";
+}
+
+// nome único do arquivo dentro do bucket. O crypto.randomUUID() só existe
+// em contexto seguro (https:// ou localhost), o mesmo requisito que o resto
+// do sistema já documenta.
+function gerarNomeDoAtestado(extensao) {
+  if (typeof crypto === "undefined" || typeof crypto.randomUUID !== "function") {
+    throw new Error(
+      "Não foi possível gerar o nome do arquivo do atestado " +
+        "(crypto.randomUUID indisponível). Abra o sistema por https:// ou por localhost."
+    );
+  }
+  return `${crypto.randomUUID()}.${extensao}`;
+}
+
+// redimensiona a imagem para no máximo 1600px de largura e converte para
+// JPEG (qualidade 0.85), devolvendo um Blob. Se a imagem não puder ser
+// aberta ou desenhada, devolve null — quem chamou decide o que fazer
+// (o arquivo original é enviado mesmo assim).
+function redimensionarImagemAtestado(arquivo) {
+  return new Promise((resolve) => {
+    const leitor = new FileReader();
+    leitor.onerror = () => resolve(null);
+    leitor.onload = () => {
+      const imagem = new Image();
+      imagem.onerror = () => resolve(null);
+      imagem.onload = () => {
+        try {
+          const larguraMaxima = 1600;
+          const escala = Math.min(1, larguraMaxima / imagem.width);
+          const largura = Math.max(1, Math.round(imagem.width * escala));
+          const altura = Math.max(1, Math.round(imagem.height * escala));
+
+          const canvas = document.createElement("canvas");
+          canvas.width = largura;
+          canvas.height = altura;
+          canvas.getContext("2d").drawImage(imagem, 0, 0, largura, altura);
+
+          canvas.toBlob((blob) => resolve(blob || null), "image/jpeg", 0.85);
+        } catch {
+          resolve(null);
+        }
+      };
+      imagem.src = leitor.result;
+    };
+    leitor.readAsDataURL(arquivo);
+  });
 }
 
 const Dados = {
@@ -954,10 +1029,65 @@ const Dados = {
     return () => supabase.removeChannel(canal);
   },
 
+  /* ---------------------------------------------------------------
+     ANEXO DO ATESTADO — envia o arquivo para o Storage e devolve o
+     CAMINHO dele dentro do bucket público "atestados" (é esse caminho
+     que vai para a coluna atestado_path).
+       - aceita imagem ou PDF; qualquer outro tipo -> lança Error
+       - acima de 10 MB -> lança Error com mensagem clara
+       - imagem: é redimensionada no canvas (máx. 1600px de largura,
+         JPEG qualidade 0.85) antes de subir; se a imagem não puder ser
+         aberta, o arquivo original é enviado mesmo assim
+       - PDF: sobe como está, sem passar pelo canvas
+       - sucesso -> devolve o caminho do arquivo no bucket
+     --------------------------------------------------------------- */
+  async enviarAtestado(arquivo) {
+    if (!arquivo) throw new Error("Selecione o arquivo do atestado");
+
+    const ehPdf = arquivo.type === "application/pdf";
+    const ehImagem = String(arquivo.type || "").startsWith("image/");
+    if (!ehPdf && !ehImagem) {
+      throw new Error("O atestado precisa ser uma foto (jpg, png...) ou um arquivo PDF");
+    }
+
+    // 10 MB
+    if (arquivo.size > 10 * 1024 * 1024) {
+      throw new Error(
+        "O arquivo do atestado passa de 10 MB. Envie uma foto ou um PDF menor."
+      );
+    }
+
+    let conteudo = arquivo;
+    let extensao = extensaoDoAtestado(arquivo);
+    let contentType = arquivo.type || "application/octet-stream";
+
+    if (ehImagem) {
+      const redimensionada = await redimensionarImagemAtestado(arquivo);
+      if (redimensionada) {
+        conteudo = redimensionada;
+        extensao = "jpg";
+        contentType = "image/jpeg";
+      }
+    }
+
+    const caminho = gerarNomeDoAtestado(extensao);
+    const { error } = await supabase.storage
+      .from("atestados")
+      .upload(caminho, conteudo, { contentType });
+
+    if (error) {
+      throw new Error(`Não foi possível enviar o atestado para o Supabase: ${error.message}`, {
+        cause: error,
+      });
+    }
+
+    return caminho;
+  },
+
   // grava uma entrada atrasada nova na tabela "atrasos" do Supabase (o id da
-  // linha é gerado pelo próprio banco). A foto do atestado NÃO é mais gravada
-  // aqui em base64: o que chega é o caminho do arquivo (atestadoPath), que
-  // vai para a coluna atestado_path.
+  // linha é gerado pelo próprio banco). A foto do atestado NÃO é gravada
+  // aqui: o que chega é o caminho do arquivo (atestadoPath, vindo de
+  // enviarAtestado), que vai para a coluna atestado_path.
   async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo, justificativaTipo, responsavelNome, atestadoPath, atestadoNomeArquivo }) {
     const agoraISO = new Date().toISOString();
     const { data, error } = await supabase

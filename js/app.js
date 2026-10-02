@@ -626,50 +626,9 @@ function limparJustificativaAtraso() {
   document.getElementById("atr-atestado-arquivo").value = "";
 }
 
-// comprime a foto do atestado no próprio navegador (canvas) e devolve uma
-// string base64 pronta pra gravar direto no Firestore, sem precisar do
-// Firebase Storage. Reduz a qualidade até caber no limite de 1MB por
-// documento do Firestore.
-function comprimirImagemAtestado(arquivo) {
-  return new Promise((resolve, reject) => {
-    if (!arquivo.type.startsWith("image/")) {
-      reject(new Error("O atestado precisa ser uma foto (jpg, png, etc.)"));
-      return;
-    }
-    const leitor = new FileReader();
-    leitor.onerror = () => reject(new Error("Não foi possível ler a foto do atestado"));
-    leitor.onload = () => {
-      const imagem = new Image();
-      imagem.onerror = () => reject(new Error("Essa foto não pôde ser aberta, tente outra"));
-      imagem.onload = () => {
-        const larguraMaxima = 1000;
-        const escala = Math.min(1, larguraMaxima / imagem.width);
-        const largura = Math.round(imagem.width * escala);
-        const altura = Math.round(imagem.height * escala);
-
-        const canvas = document.createElement("canvas");
-        canvas.width = largura;
-        canvas.height = altura;
-        canvas.getContext("2d").drawImage(imagem, 0, 0, largura, altura);
-
-        let qualidade = 0.7;
-        let dataUrl = canvas.toDataURL("image/jpeg", qualidade);
-        while (dataUrl.length > 700000 && qualidade > 0.3) {
-          qualidade -= 0.1;
-          dataUrl = canvas.toDataURL("image/jpeg", qualidade);
-        }
-
-        if (dataUrl.length > 700000) {
-          reject(new Error("Essa foto ainda ficou grande demais. Tente tirar de novo com menos zoom."));
-          return;
-        }
-        resolve(dataUrl);
-      };
-      imagem.src = leitor.result;
-    };
-    leitor.readAsDataURL(arquivo);
-  });
-}
+// A compressão da foto em base64 saiu daqui: o atestado agora sobe para o
+// Supabase Storage por Dados.enviarAtestado (ver js/dados.js), que já
+// redimensiona a imagem quando é preciso.
 
 function prepararEntradaAtrasada() {
   const sessao = Sessao.obter();
@@ -737,7 +696,7 @@ function prepararEntradaAtrasada() {
 
     const atestadoArquivo = document.getElementById("atr-atestado-arquivo").files[0];
     if (justificativaAtrasoSelecionada === "ATESTADO" && !atestadoArquivo) {
-      mensagemErro.textContent = "Anexe uma foto do atestado";
+      mensagemErro.textContent = "Anexe o atestado (foto ou PDF)";
       mensagemErro.style.display = "block";
       return;
     }
@@ -746,13 +705,13 @@ function prepararEntradaAtrasada() {
     const textoOriginalBotao = botaoEnviar.textContent;
     botaoEnviar.disabled = true;
 
-    let atestadoBase64 = null;
+    let atestadoPath = null;
     let atestadoNomeArquivo = null;
 
     try {
       if (justificativaAtrasoSelecionada === "ATESTADO") {
-        botaoEnviar.textContent = "Comprimindo foto...";
-        atestadoBase64 = await comprimirImagemAtestado(atestadoArquivo);
+        botaoEnviar.textContent = "Enviando arquivo...";
+        atestadoPath = await Dados.enviarAtestado(atestadoArquivo);
         atestadoNomeArquivo = atestadoArquivo.name;
       }
     } catch (erro) {
@@ -774,7 +733,7 @@ function prepararEntradaAtrasada() {
         motivo,
         justificativaTipo: justificativaAtrasoSelecionada,
         responsavelNome,
-        atestadoBase64,
+        atestadoPath,
         atestadoNomeArquivo,
       });
     } catch (erro) {
@@ -1214,7 +1173,7 @@ function prepararEntradaAtrasada() {
           ${ent.justificativaTipo === "RESPONSAVEL"
             ? `Veio com responsável: ${escapar(ent.responsavelNome || "não informado")}`
             : ent.justificativaTipo === "ATESTADO"
-              ? `Atestado: ${ent.atestadoBase64 ? `<a href="#" onclick="verAtestado('${ent.id}'); return false;">ver foto</a>` : "anexado"}`
+              ? `Atestado: ${ent.atestadoUrl ? `<a href="#" onclick="verAtestado('${ent.id}'); return false;">ver foto</a>` : "anexado"}`
               : "Sem responsável ou atestado (registro antigo)"}
         </p>
 
@@ -1264,25 +1223,14 @@ function prepararEntradaAtrasada() {
     renderizar();
   };
 
-  // abre a foto do atestado numa aba nova. Não usamos <a href="data:...">
-  // direto porque o Chrome bloqueia navegar pra uma URL base64 por
-  // segurança — em vez disso abrimos uma aba em branco e desenhamos a
-  // imagem dentro dela.
+  // abre o atestado numa aba nova. O arquivo agora mora no Supabase Storage
+  // (bucket público "atestados"), então basta abrir a URL pública que veio
+  // junto com a entrada (atestadoUrl) — não é mais preciso desenhar a
+  // imagem numa aba em branco a partir de um base64.
   window.verAtestado = function (id) {
     const entrada = atrasosDoPainel.find((e) => e.id === id);
-    if (!entrada || !entrada.atestadoBase64) return;
-    const janela = window.open("", "_blank");
-    if (!janela) {
-      alert("Seu navegador bloqueou a abertura da aba. Permita pop-ups para este site e tente de novo.");
-      return;
-    }
-    janela.document.write(`
-      <title>Atestado</title>
-      <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-        <img src="${entrada.atestadoBase64}" style="max-width:100%;max-height:100vh;" />
-      </body>
-    `);
-    janela.document.close();
+    if (!entrada || !entrada.atestadoUrl) return;
+    window.open(entrada.atestadoUrl, "_blank");
   };
 
   document.querySelectorAll(".filtro-btn").forEach((botao) => {
