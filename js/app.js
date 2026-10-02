@@ -104,6 +104,63 @@ function limparTela(id) {
     .forEach((msg) => (msg.style.display = "none"));
 }
 
+/* =====================================================================
+   AVISO DE INDISPONIBILIDADE (Supabase pausado / sem conexão)
+   ---------------------------------------------------------------------
+   Quando o Supabase está pausado ou inacessível, o erro que sobe do
+   Dados é técnico ("Failed to fetch", 503, timeout...) e não ajuda quem
+   está usando o sistema. Nessas telas (login, registro de ocorrência /
+   atraso e painel) o texto técnico é trocado por este aviso único — o
+   erro original continua indo para o console do navegador.
+
+   Isto é DIFERENTE de "senha incorreta": senha errada não passa por
+   aqui — o login devolve null e a tela mostra o aviso de senha errada
+   (ver os blocos `if (!professor)` / `if (!aluno)` logo abaixo).
+   ===================================================================== */
+const AVISO_SISTEMA_INDISPONIVEL =
+  "Sistema temporariamente indisponível. Avise a secretaria ou tente novamente em alguns minutos.";
+
+// Reconhece a falha de conexão/banco (Supabase pausado, sem internet,
+// timeout, 5xx, permissão no banco...) a partir do erro que veio do Dados.
+// Os erros do banco sobem sempre com a palavra "Supabase" na mensagem e com
+// o erro original em "cause" (ver os throw de js/dados.js), então não é
+// preciso depender do texto que cada navegador inventa para "sem rede".
+function ehFalhaDeSistema(erro) {
+  if (!erro) return false;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  if (erro.cause) return true;
+  const mensagem = String(erro.message || "");
+  if (/supabase/i.test(mensagem)) return true;
+  return /failed to fetch|networkerror|network error|load failed|fetch failed|timed?\s?out|timeout|econnrefused|enotfound|etimedout|eai_again|service unavailable|bad gateway|gateway timeout|internal server error|too many requests|\b50[0-9]\b/i.test(
+    mensagem
+  );
+}
+
+// Mostra o erro na tela: falha de conexão/banco vira o aviso amigável (e o
+// detalhe técnico fica no console); qualquer outro erro continua aparecendo
+// como antes (ex.: mensagens de validação do próprio formulário).
+function mostrarErroDeSistema(mensagemErro, erro) {
+  console.error("Falha de comunicação com o sistema (Supabase):", erro);
+  mensagemErro.textContent = ehFalhaDeSistema(erro)
+    ? AVISO_SISTEMA_INDISPONIVEL
+    : String(erro?.message || "");
+  mensagemErro.style.display = "block";
+}
+
+// Mesmo aviso, agora dentro do painel da secretaria (o <p> fica no
+// index.html, acima das seções do painel — ver renderizar() no fim do arquivo).
+function mostrarAvisoSistema() {
+  const aviso = document.getElementById("pn-mensagem-sistema");
+  if (!aviso) return;
+  aviso.textContent = AVISO_SISTEMA_INDISPONIVEL;
+  aviso.style.display = "block";
+}
+
+function esconderAvisoSistema() {
+  const aviso = document.getElementById("pn-mensagem-sistema");
+  if (aviso) aviso.style.display = "none";
+}
+
 // historico: "push" (padrão), "replace" ou "nenhum" (a URL já está certa, ex.: botão voltar)
 function showView(id, { sub = null, historico = "push" } = {}) {
   let cfg = VIEWS[id];
@@ -153,9 +210,10 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     try {
       professor = await Dados.autenticarProfessor(ra, senha);
     } catch (erro) {
-      // servidor fora do ar / endereço errado (não é senha errada)
-      mensagemErro.textContent = erro.message;
-      mensagemErro.style.display = "block";
+      // falha de conexão/banco (Supabase pausado, sem internet...): aviso
+      // amigável na tela e erro técnico no console. NÃO é senha errada —
+      // senha errada devolve null e cai no `if (!professor)` abaixo.
+      mostrarErroDeSistema(mensagemErro, erro);
       return;
     }
 
@@ -203,9 +261,10 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     try {
       aluno = await Dados.autenticarAluno(ra, senha);
     } catch (erro) {
-      // servidor fora do ar / endereço errado (não é RA/senha errados)
-      mensagemErro.textContent = erro.message;
-      mensagemErro.style.display = "block";
+      // falha de conexão/banco (Supabase pausado, sem internet...): aviso
+      // amigável na tela e erro técnico no console. NÃO é RA/senha
+      // errados — isso devolve null e cai no `if (!aluno)` abaixo.
+      mostrarErroDeSistema(mensagemErro, erro);
       return;
     }
 
@@ -594,8 +653,9 @@ function prepararNovaOcorrencia() {
         detalhes,
       });
     } catch (erro) {
-      mensagemErro.textContent = erro.message;
-      mensagemErro.style.display = "block";
+      // gravação no Supabase: falha de conexão/banco vira o aviso amigável
+      // (o erro técnico continua no console, ver mostrarErroDeSistema)
+      mostrarErroDeSistema(mensagemErro, erro);
       return;
     }
 
@@ -716,8 +776,10 @@ function prepararEntradaAtrasada() {
         atestadoNomeArquivo = atestadoArquivo.name;
       }
     } catch (erro) {
-      mensagemErro.textContent = erro.message;
-      mensagemErro.style.display = "block";
+      // upload no Supabase Storage: falha de conexão/banco vira o aviso
+      // amigável; problemas do próprio arquivo (formato, tamanho...) são
+      // mensagens de formulário e continuam aparecendo como antes
+      mostrarErroDeSistema(mensagemErro, erro);
       botaoEnviar.disabled = false;
       botaoEnviar.textContent = textoOriginalBotao;
       return;
@@ -738,8 +800,9 @@ function prepararEntradaAtrasada() {
         atestadoNomeArquivo,
       });
     } catch (erro) {
-      mensagemErro.textContent = erro.message;
-      mensagemErro.style.display = "block";
+      // gravação no Supabase: falha de conexão/banco vira o aviso amigável
+      // (o erro técnico continua no console, ver mostrarErroDeSistema)
+      mostrarErroDeSistema(mensagemErro, erro);
       botaoEnviar.disabled = false;
       botaoEnviar.textContent = textoOriginalBotao;
       return;
@@ -1197,8 +1260,13 @@ function prepararEntradaAtrasada() {
   async function renderizar() {
     try {
       await carregarDados();
+      // conseguiu falar com o banco: o aviso de indisponibilidade sai de cena
+      esconderAvisoSistema();
     } catch (erro) {
       console.error("Não foi possível carregar os dados do painel.", erro);
+      // falha de conexão/banco (Supabase pausado, sem internet...): avisa na
+      // tela sem interromper o desenho do painel (o que já tinha continua lá)
+      if (ehFalhaDeSistema(erro)) mostrarAvisoSistema();
     }
     renderizarOcorrencias();
     renderizarAtrasos();

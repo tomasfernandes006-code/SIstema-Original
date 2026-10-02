@@ -518,6 +518,11 @@
 
       <!-- CONTEÚDO PRINCIPAL -->
       <main class="dashboard-main">
+        <!-- Aviso de indisponibilidade: fica escondido e só aparece quando
+             não dá para falar com o banco (Supabase pausado, sem internet).
+             Quem liga/desliga é o renderizar() do painel, em js/app.js. -->
+        <p class="erro" id="pn-mensagem-sistema" style="display:none;"></p>
+
         <!-- SEÇÃO: DASHBOARD -->
         <div id="pn-secao-dashboard" class="painel-secao">
           <div class="topo-painel">
