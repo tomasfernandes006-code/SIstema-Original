@@ -1,0 +1,23 @@
+name: Manter Supabase ativo
+on:
+  schedule:
+    - cron: "0 12 */3 * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar o banco
+        env:
+          SUPABASE_URL: https://mbectpiohzcsoeguvqyd.supabase.co
+          SUPABASE_KEY: sb_publishable_x5s34cGpx3UYk2edqKMxkA_Qz2OlTLS
+        run: |
+          status=$(curl -s -o resposta.txt -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/ocorrencias?select=id&limit=1" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY")
+          echo "HTTP $status"; cat resposta.txt
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Supabase não respondeu (HTTP $status)."
+            exit 1
+          fi
