@@ -16,7 +16,7 @@
 import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const URL_DESTINO = "/#/painel";
+const URL_DESTINO = "https://tomasfernandes006-code.github.io/SIstema-Original/#/painel";
 
 // Cliente com a chave de serviço: lê e apaga linhas de push_subscriptions
 // ignorando as políticas de RLS (é uma função do servidor).
