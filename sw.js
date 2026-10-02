@@ -11,7 +11,7 @@ self.addEventListener("push", (event) => {
 
   const title = dados.title || "Nova notificação";
   const body = dados.body || "";
-  const url = dados.url || "/#/painel";
+  const url = dados.url || "./#/painel";
 
   event.waitUntil(
     self.registration.showNotification(title, {
@@ -27,7 +27,7 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
-  const url = (event.notification.data && event.notification.data.url) || "/#/painel";
+  const url = (event.notification.data && event.notification.data.url) || "./#/painel";
 
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {

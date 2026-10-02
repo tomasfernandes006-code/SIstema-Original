@@ -25,7 +25,7 @@ function converterChaveBase64Url(chave) {
 /**
  * Ativa as notificações push para a secretaria:
  *   1) pede a permissão de notificação no navegador;
- *   2) registra o service worker sw.js na raiz (scope "/");
+ *   2) registra o service worker sw.js na raiz (scope "./");
  *   3) cria a inscrição push deste navegador (pushManager.subscribe);
  *   4) grava/atualiza a inscrição na tabela "push_subscriptions" do
  *      Supabase, usando o endpoint como chave (onConflict "endpoint").
@@ -46,7 +46,7 @@ export async function ativarPush() {
     if (permissao !== "granted") return null;
 
     // 2) service worker na raiz (mesmo escopo do app)
-    const registro = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    const registro = await navigator.serviceWorker.register("sw.js", { scope: "./" });
 
     // 3) inscrição push deste dispositivo/navegador
     const assinatura = await registro.pushManager.subscribe({

@@ -1,7 +1,7 @@
 {
   "name": "Sistema de Ocorrências",
   "short_name": "Ocorrências",
-  "start_url": "/#/painel",
+  "start_url": "./#/painel",
   "display": "standalone",
   "icons": [
     {
