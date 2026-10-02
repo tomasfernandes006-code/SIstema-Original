@@ -1,0 +1,2 @@
+[functions.enviar-push]
+verify_jwt = false

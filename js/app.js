@@ -1267,7 +1267,11 @@ function prepararEntradaAtrasada() {
     } catch (erro) {
       console.error("Não foi possível ativar as notificações push.", erro);
     }
-    botao.textContent = token ? "🔔 Notificações ativas" : "Permissão negada";
+    botao.textContent = token
+      ? "🔔 Notificações ativas"
+      : Notification.permission === "denied"
+        ? "Permissão negada"
+        : "Erro ao ativar (veja o console)";
   });
 
   // A lista de alunos (GET /alunos) também vem do servidor: quando ela

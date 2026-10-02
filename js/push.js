@@ -7,7 +7,7 @@ import { supabase } from "./supabase-config.js";
 
 // Chave pública VAPID (Web Push) do servidor que envia as notificações.
 // A chave privada correspondente fica só no servidor, nunca aqui no site.
-const VAPID_PUBLICA = "BLV1uRb7i-YTboiP_EnfKrMsCl3NJvFSa7ydufJ0TKD8SSFa9c9jzaKYoTb1LR4TGmY-GeosheJUN-Z5phxQnAQ";
+const VAPID_PUBLICA = "BDPxs1z0JSD96MYZdWS212D2d9Qwg2xkNuoPRgTMa_7nhP_6souZmx-6s8Fcbh2oCk36PE944gp46WLsvSyYRp8";
 
 // converte a chave VAPID de base64url (formato em que ela é publicada) para
 // o Uint8Array que o pushManager.subscribe espera em applicationServerKey
