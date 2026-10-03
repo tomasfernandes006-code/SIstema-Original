@@ -57,9 +57,15 @@ const VIEWS = {
   "painel": {
     guard: () => Sessao.obter()?.tipo === "SECRETARIA",
     guardRedirect: "secretaria-login",
-    // entrada no painel: liga a escuta em tempo real (canal do Supabase)
-    // e faz o primeiro desenho do painel (ver window.iniciarPainel)
-    aoEntrar: (sub) => {
+    // entrada no painel: exige uma sessão de secretaria no Supabase Auth
+    // (sem ela, manda para o login); com sessão, liga a escuta em tempo real
+    // (canal do Supabase) e faz o primeiro desenho (ver window.iniciarPainel)
+    aoEntrar: async (sub) => {
+      if (!(await Dados.temSessaoSecretaria())) {
+        Sessao.encerrar();
+        showView("secretaria-login");
+        return;
+      }
       window.iniciarPainel();
       window.alternarPainel(sub);
     },
@@ -419,20 +425,27 @@ function showView(id, { sub = null, historico = "push" } = {}) {
   const form = document.getElementById("sl-form-login");
   const mensagemErro = document.getElementById("sl-mensagem-erro");
 
-  // o login da secretaria é conferido aqui mesmo, na lista USUARIOS do
-  // dados.js (sem consulta de rede: o USUARIOS é fixo no código); o
-  // handler continua async como os outros formulários
+  // o login da secretaria agora é conferido no BANCO (Supabase), pela
+  // função verificar_senha_secretaria (chamada por Dados.autenticarSecretaria);
+  // o handler continua async como os outros formulários
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const usuario = document.getElementById("sl-usuario").value.trim();
-    const senha = document.getElementById("sl-senha").value.trim();
+    const senha = document.getElementById("sl-senha").value;
 
     let conta;
     try {
       conta = await Dados.autenticarSecretaria(usuario, senha);
     } catch (erro) {
-      // servidor fora do ar / endereço errado (não é usuário/senha errados)
-      mensagemErro.textContent = erro.message;
+      // falha de conexão/banco (Supabase pausado, sem internet...): aviso
+      // amigável na tela e erro técnico no console. NÃO é usuário/senha
+      // errados — isso devolve null e cai no `if (!conta)` abaixo.
+      if (ehFalhaDeSistema(erro)) {
+        console.error("Falha de comunicação com o sistema (Supabase):", erro);
+        mensagemErro.textContent = AVISO_SISTEMA_INDISPONIVEL;
+      } else {
+        mensagemErro.textContent = erro.message;
+      }
       mensagemErro.style.display = "block";
       return;
     }
@@ -831,10 +844,11 @@ function prepararEntradaAtrasada() {
    — só é alcançável depois do login de secretaria, ver VIEWS.guard
    ===================================================================== */
 (function () {
-  document.getElementById("pn-botao-sair").addEventListener("click", () => {
+  document.getElementById("pn-botao-sair").addEventListener("click", async () => {
     // desliga a escuta em tempo real antes de sair: sem isso o painel
     // continuaria recebendo snapshots (e tocando alerta) fora da tela
     window.pararPainel();
+    await Dados.sairSecretaria();
     Sessao.encerrar();
     showView("index");
   });

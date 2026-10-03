@@ -21,13 +21,6 @@ import { supabase } from "./supabase-config.js";
 const CHAVE_OCORRENCIAS = "livro-ocorrencias:dados";
 const CHAVE_ENTRADAS_ATRASADAS = "livro-ocorrencias:entradas-atrasadas";
 
-// ---- usuários fixos no código ----
-// Só a SECRETARIA continua aqui. Os PROFESSORES ficam exclusivamente
-// no arquivo professores.json (ver seção PROFESSORES logo abaixo).
-const USUARIOS = [
-  { id: "s1", nome: "Secretaria Central", usuario: "secretaria", senha: "1234", tipo: "SECRETARIA" },
-];
-
 /* ---------------------------------------------------------------------
    ALUNOS — TODOS ficam em UM ÚNICO arquivo: alunos.json
    ---------------------------------------------------------------------
@@ -726,10 +719,31 @@ const Dados = {
     return PROFESSORES.slice();
   },
 
-  autenticarSecretaria(usuario, senha) {
-    return USUARIOS.find(
-      (u) => u.tipo === "SECRETARIA" && u.usuario === usuario && u.senha === senha
-    ) || null;
+  async autenticarSecretaria(usuario, senha) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: String(usuario ?? "").trim(),
+      password: String(senha ?? ""),
+    });
+
+    if (error) {
+      // credenciais erradas (e-mail/senha inválidos) -> login negado
+      if (error.code === "invalid_credentials" || error.status === 400) return null;
+      throw new Error(
+        `Não foi possível conferir o login da secretaria no Supabase: ${error.message}`,
+        { cause: error }
+      );
+    }
+
+    return { id: data.user.id, nome: "Secretaria Central", tipo: "SECRETARIA" };
+  },
+
+  async temSessaoSecretaria() {
+    const { data } = await supabase.auth.getSession();
+    return !!data.session;
+  },
+
+  async sairSecretaria() {
+    await supabase.auth.signOut();
   },
 
   /* ---------------------------------------------------------------
@@ -953,7 +967,7 @@ const Dados = {
   // linha é gerado pelo próprio banco)
   async criarOcorrencia({ professorId, professorNome, alunoNome, alunoRa, turma, tipo, gravidade, detalhes }) {
     const agoraISO = new Date().toISOString();
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("ocorrencias")
       .insert({
         professor_id: professorId,
@@ -967,9 +981,7 @@ const Dados = {
         status: "NOVA",
         criada_em: agoraISO,
         atualizada_em: agoraISO,
-      })
-      .select()
-      .single();
+      });
 
     if (error) {
       throw new Error(`Não foi possível gravar a ocorrência no Supabase: ${error.message}`, {
@@ -978,8 +990,7 @@ const Dados = {
     }
 
     avisarMudancaOcorrencias();
-    // devolve a ocorrência já no formato das telas (camelCase), com o id do banco
-    return deLinhaOcorrencia(data);
+    return null;
   },
 
   async listarOcorrencias({ apenasAbertas } = {}) {
@@ -1087,7 +1098,7 @@ const Dados = {
   // enviarAtestado), que vai para a coluna atestado_path.
   async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo, justificativaTipo, responsavelNome, atestadoPath, atestadoNomeArquivo }) {
     const agoraISO = new Date().toISOString();
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("atrasos")
       .insert({
         aluno_id: alunoId,
@@ -1102,9 +1113,7 @@ const Dados = {
         status: "NOVA",
         criada_em: agoraISO,
         atualizada_em: agoraISO,
-      })
-      .select()
-      .single();
+      });
 
     if (error) {
       throw new Error(`Não foi possível gravar a entrada atrasada no Supabase: ${error.message}`, {
@@ -1113,8 +1122,7 @@ const Dados = {
     }
 
     avisarMudancaEntradasAtrasadas();
-    // devolve a entrada já no formato das telas (camelCase), com o id do banco
-    return deLinhaAtraso(data);
+    return null;
   },
 
   async listarEntradasAtrasadas({ apenasAbertas } = {}) {
