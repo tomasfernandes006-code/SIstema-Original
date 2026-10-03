@@ -673,7 +673,7 @@ const Dados = {
     // padrão — assim o hash das senhas nunca chega ao navegador.
     //   true  -> a senha confere: seguimos para a busca no professores.json
     //   false -> senha errada (login negado)
-    const { data: senhaConfere, error } = await supabase.rpc("verificar_senha", {
+    const { data: token, error } = await supabase.rpc("entrar_app", {
       p_tipo: "PROFESSOR",
       p_ra: raDigitado,
       p_senha: senhaDigitada,
@@ -688,10 +688,10 @@ const Dados = {
       );
     }
 
-    if (senhaConfere !== true) return null;
+    if (!token) return null;
 
     const professor = PROFESSORES.find((p) => p.ra === raDigitado);
-    return professor ? { ...professor } : null;
+    return professor ? { ...professor, token } : null;
   },
 
   // força uma nova leitura do professores.json (a lista já é relida a
@@ -770,7 +770,7 @@ const Dados = {
     // assim o hash das senhas nunca chega ao navegador.
     //   true  -> a senha confere: seguimos para a busca no alunos.json
     //   false -> senha errada (login negado)
-    const { data: senhaConfere, error } = await supabase.rpc("verificar_senha", {
+    const { data: token, error } = await supabase.rpc("entrar_app", {
       p_tipo: "ALUNO",
       p_ra: raDigitado,
       p_senha: senhaDigitada,
@@ -785,12 +785,12 @@ const Dados = {
       );
     }
 
-    if (senhaConfere !== true) return null;
+    if (!token) return null;
 
     await garantirAlunosCarregados();
 
     const aluno = ALUNOS.find((a) => a.ra === raDigitado);
-    return aluno ? { ...aluno } : null;
+    return aluno ? { ...aluno, token } : null;
   },
 
   /* ---------------------------------------------------------------
@@ -965,25 +965,23 @@ const Dados = {
 
   // grava uma ocorrência nova na tabela "ocorrencias" do Supabase (o id da
   // linha é gerado pelo próprio banco)
-  async criarOcorrencia({ professorId, professorNome, alunoNome, alunoRa, turma, tipo, gravidade, detalhes }) {
+  async criarOcorrencia({ professorId, professorNome, alunoNome, alunoRa, turma, tipo, gravidade, detalhes, token }) {
     const agoraISO = new Date().toISOString();
-    const { error } = await supabase
-      .from("ocorrencias")
-      .insert({
-        professor_id: professorId,
-        professor_nome: professorNome,
-        aluno_nome: alunoNome,
-        aluno_ra: alunoRa,
-        turma: turma || null,
-        tipo,
-        gravidade,
-        detalhes: detalhes || "",
-        status: "NOVA",
-        criada_em: agoraISO,
-        atualizada_em: agoraISO,
-      });
+    const { error } = await supabase.rpc("criar_ocorrencia", {
+      p_token: token ?? "",
+      p_professor_nome: professorNome,
+      p_aluno_nome: alunoNome,
+      p_aluno_ra: alunoRa,
+      p_turma: turma || null,
+      p_tipo: tipo,
+      p_gravidade: gravidade,
+      p_detalhes: detalhes || "",
+    });
 
     if (error) {
+      if (String(error.message || "").includes("Sessão expirada")) {
+        throw new Error("Sua sessão expirou. Saia e entre novamente.");
+      }
       throw new Error(`Não foi possível gravar a ocorrência no Supabase: ${error.message}`, {
         cause: error,
       });
@@ -1096,26 +1094,23 @@ const Dados = {
   // linha é gerado pelo próprio banco). A foto do atestado NÃO é gravada
   // aqui: o que chega é o caminho do arquivo (atestadoPath, vindo de
   // enviarAtestado), que vai para a coluna atestado_path.
-  async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo, justificativaTipo, responsavelNome, atestadoPath, atestadoNomeArquivo }) {
+  async criarEntradaAtrasada({ alunoId, alunoNome, alunoRa, turma, motivo, justificativaTipo, responsavelNome, atestadoPath, atestadoNomeArquivo, token }) {
     const agoraISO = new Date().toISOString();
-    const { error } = await supabase
-      .from("atrasos")
-      .insert({
-        aluno_id: alunoId,
-        aluno_nome: alunoNome,
-        aluno_ra: alunoRa,
-        turma: turma || null,
-        motivo,
-        justificativa_tipo: justificativaTipo,
-        responsavel_nome: responsavelNome || null,
-        atestado_path: atestadoPath || null,
-        atestado_nome_arquivo: atestadoNomeArquivo || null,
-        status: "NOVA",
-        criada_em: agoraISO,
-        atualizada_em: agoraISO,
-      });
+    const { error } = await supabase.rpc("criar_atraso", {
+      p_token: token ?? "",
+      p_aluno_nome: alunoNome,
+      p_turma: turma || null,
+      p_motivo: motivo,
+      p_justificativa_tipo: justificativaTipo,
+      p_responsavel_nome: responsavelNome || null,
+      p_atestado_path: atestadoPath || null,
+      p_atestado_nome_arquivo: atestadoNomeArquivo || null,
+    });
 
     if (error) {
+      if (String(error.message || "").includes("Sessão expirada")) {
+        throw new Error("Sua sessão expirou. Saia e entre novamente.");
+      }
       throw new Error(`Não foi possível gravar a entrada atrasada no Supabase: ${error.message}`, {
         cause: error,
       });

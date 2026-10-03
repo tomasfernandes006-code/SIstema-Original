@@ -664,6 +664,7 @@ function prepararNovaOcorrencia() {
         tipo: tipoSelecionado,
         gravidade: gravidadeSelecionada,
         detalhes,
+        token: sessao.token,
       });
     } catch (erro) {
       // gravação no Supabase: falha de conexão/banco vira o aviso amigável
@@ -811,6 +812,7 @@ function prepararEntradaAtrasada() {
         responsavelNome,
         atestadoPath,
         atestadoNomeArquivo,
+        token: sessao.token,
       });
     } catch (erro) {
       // gravação no Supabase: falha de conexão/banco vira o aviso amigável
