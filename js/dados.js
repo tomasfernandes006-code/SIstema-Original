@@ -21,6 +21,15 @@ import { supabase } from "./supabase-config.js";
 const CHAVE_OCORRENCIAS = "livro-ocorrencias:dados";
 const CHAVE_ENTRADAS_ATRASADAS = "livro-ocorrencias:entradas-atrasadas";
 
+// tipos de atestado aceitos no upload -> extensão do arquivo no bucket.
+// É a ÚNICA fonte da extensão e do contentType (nunca o nome do arquivo).
+const TIPOS_ATESTADO_ACEITOS = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+};
+
 /* ---------------------------------------------------------------------
    ALUNOS — TODOS ficam em UM ÚNICO arquivo: alunos.json
    ---------------------------------------------------------------------
@@ -571,16 +580,10 @@ function avisarMudancaEntradasAtrasadas() {
    A URL pública é montada depois, em deLinhaAtraso, a partir do caminho.
    --------------------------------------------------------------------- */
 
-// extensão do arquivo (sem o ponto, em minúsculas). Usa o tipo MIME como
-// reserva quando o nome do arquivo não traz uma extensão utilizável.
+// extensão do arquivo (sem o ponto, em minúsculas): vem SEMPRE do mapa
+// TIPOS_ATESTADO_ACEITOS, a partir do tipo MIME — nunca do nome do arquivo.
 function extensaoDoAtestado(arquivo) {
-  const partes = String(arquivo.name || "").split(".");
-  const doNome = partes.length > 1 ? partes.pop().toLowerCase() : "";
-  if (/^[a-z0-9]{2,5}$/.test(doNome)) return doNome;
-  if (arquivo.type === "application/pdf") return "pdf";
-  if (arquivo.type === "image/png") return "png";
-  if (arquivo.type === "image/webp") return "webp";
-  return "jpg";
+  return TIPOS_ATESTADO_ACEITOS[arquivo.type];
 }
 
 // nome único do arquivo dentro do bucket. O crypto.randomUUID() só existe
@@ -1040,7 +1043,7 @@ const Dados = {
        - PDF: sobe como está, sem passar pelo canvas
        - sucesso -> devolve o caminho do arquivo no bucket
      --------------------------------------------------------------- */
-  async enviarAtestado(arquivo) {
+  async enviarAtestado(arquivo, token) {
     if (!arquivo) throw new Error("Selecione o arquivo do atestado");
 
     const ehPdf = arquivo.type === "application/pdf";
@@ -1057,24 +1060,76 @@ const Dados = {
     }
 
     let conteudo = arquivo;
+    // a extensão vem do mapa de tipos aceitos, nunca do nome do arquivo
     let extensao = extensaoDoAtestado(arquivo);
-    let contentType = arquivo.type || "application/octet-stream";
+    let contentType = arquivo.type;
 
     if (ehImagem) {
       const redimensionada = await redimensionarImagemAtestado(arquivo);
       if (redimensionada) {
         conteudo = redimensionada;
-        extensao = "jpg";
+        extensao = TIPOS_ATESTADO_ACEITOS["image/jpeg"];
         contentType = "image/jpeg";
+      } else if (!TIPOS_ATESTADO_ACEITOS[contentType]) {
+        // não deu para redimensionar e o tipo fora dos aceitos (HEIC,
+        // HEIF, TIFF...): manda uma mensagem clara em vez de subir um
+        // arquivo que o navegador nem conseguiu ler
+        throw new Error(
+          "Não consegui ler essa foto. Tire a foto de novo pela câmera do celular ou envie o atestado em PDF."
+        );
       }
     }
 
-    const caminho = gerarNomeDoAtestado(extensao);
+    // reserva o nome do arquivo no banco (ligado ao token da sessão) e usa
+    // o nome devolvido como caminho do upload
+    const { data: caminho, error: erroReserva } = await supabase.rpc("reservar_atestado", {
+      p_token: token ?? "",
+      p_extensao: extensao,
+    });
+
+    if (erroReserva) {
+      const mensagemReserva = String(erroReserva.message || "");
+      if (mensagemReserva.includes("Sessão expirada")) {
+        throw new Error("Sua sessão expirou. Saia e entre novamente.");
+      }
+      if (mensagemReserva.includes("Muitos envios")) {
+        throw new Error("Muitos envios seguidos. Espere alguns minutos e tente de novo.");
+      }
+      throw new Error(`Não foi possível reservar o atestado no Supabase: ${erroReserva.message}`, {
+        cause: erroReserva,
+      });
+    }
+
     const { error } = await supabase.storage
       .from("atestados")
       .upload(caminho, conteudo, { contentType });
 
     if (error) {
+      const status = error.status ?? error.statusCode;
+      const mensagem = String(error.message || "").toLowerCase();
+
+      // recusa do Storage por tamanho ou por tipo: mensagem amigável SEM
+      // cause e SEM a palavra "Supabase" (senão a tela mostra o aviso de
+      // sistema indisponível em vez da mensagem acima)
+      if (
+        status === 413 ||
+        mensagem.includes("exceeded") ||
+        mensagem.includes("too large") ||
+        mensagem.includes("maximum allowed size")
+      ) {
+        throw new Error("O arquivo é grande demais. Envie uma foto ou PDF de até 10 MB.");
+      }
+
+      if (status === 415 || mensagem.includes("mime type")) {
+        throw new Error("Esse tipo de arquivo não é aceito. Envie JPG, PNG, WEBP ou PDF.");
+      }
+
+      if (status === 403 || mensagem.includes("row-level security")) {
+        throw new Error(
+          "Não foi possível enviar o arquivo agora. Saia, entre de novo e tente outra vez."
+        );
+      }
+
       throw new Error(`Não foi possível enviar o atestado para o Supabase: ${error.message}`, {
         cause: error,
       });
@@ -1091,17 +1146,11 @@ const Dados = {
       .from("atestados")
       .createSignedUrl(caminho, 120);
 
-    if (data?.signedUrl) {
-      console.info("[atestado] link temporário gerado");
-      return data.signedUrl;
+    if (error || !data?.signedUrl) {
+      throw new Error("Não foi possível gerar o link do atestado.", { cause: error });
     }
 
-    // PROVISÓRIO: remover quando o bucket virar privado (Etapa 7)
-    console.warn(
-      "[atestado] não consegui gerar o link temporário, usando o link público (provisório):",
-      error
-    );
-    return supabase.storage.from("atestados").getPublicUrl(caminho).data.publicUrl;
+    return data.signedUrl;
   },
 
   // grava uma entrada atrasada nova na tabela "atrasos" do Supabase (o id da

@@ -691,9 +691,14 @@ function prepararNovaOcorrencia() {
    — só é alcançável depois do login de aluno, ver VIEWS.guard
    ===================================================================== */
 let justificativaAtrasoSelecionada = null;
+// último atestado já enviado nesta tentativa { nome, tamanho, lastModified,
+// caminho }: quando a gravação do atraso falha e o aluno tenta de novo com o
+// mesmo arquivo, o caminho é reaproveitado em vez de subir outro arquivo órfão
+let atestadoEnviado = null;
 
 function limparJustificativaAtraso() {
   justificativaAtrasoSelecionada = null;
+  atestadoEnviado = null;
   document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((b) => b.classList.remove("ativa"));
   document.getElementById("atr-campo-responsavel").style.display = "none";
   document.getElementById("atr-campo-atestado").style.display = "none";
@@ -727,10 +732,16 @@ function prepararEntradaAtrasada() {
   document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((botao) => {
     botao.addEventListener("click", () => {
       justificativaAtrasoSelecionada = botao.dataset.justificativa;
+      atestadoEnviado = null;
       document.querySelectorAll("#atr-pastilhas-justificativa .pastilha").forEach((b) => b.classList.toggle("ativa", b === botao));
       document.getElementById("atr-campo-responsavel").style.display = justificativaAtrasoSelecionada === "RESPONSAVEL" ? "" : "none";
       document.getElementById("atr-campo-atestado").style.display = justificativaAtrasoSelecionada === "ATESTADO" ? "" : "none";
     });
+  });
+
+  // trocar o arquivo descarta o que tinha sido enviado antes
+  document.getElementById("atr-atestado-arquivo").addEventListener("change", () => {
+    atestadoEnviado = null;
   });
 
   document.getElementById("atr-botao-sair").addEventListener("click", () => {
@@ -785,8 +796,26 @@ function prepararEntradaAtrasada() {
 
     try {
       if (justificativaAtrasoSelecionada === "ATESTADO") {
-        botaoEnviar.textContent = "Enviando arquivo...";
-        atestadoPath = await Dados.enviarAtestado(atestadoArquivo);
+        const mesmoArquivo =
+          atestadoEnviado !== null &&
+          atestadoEnviado.nome === atestadoArquivo.name &&
+          atestadoEnviado.tamanho === atestadoArquivo.size &&
+          atestadoEnviado.lastModified === atestadoArquivo.lastModified;
+
+        if (mesmoArquivo) {
+          // a gravação anterior falhou e o aluno tentou de novo com o MESMO
+          // arquivo: reaproveita o caminho já enviado, sem subir outro
+          atestadoPath = atestadoEnviado.caminho;
+        } else {
+          botaoEnviar.textContent = "Enviando arquivo...";
+          atestadoPath = await Dados.enviarAtestado(atestadoArquivo, sessao.token);
+          atestadoEnviado = {
+            nome: atestadoArquivo.name,
+            tamanho: atestadoArquivo.size,
+            lastModified: atestadoArquivo.lastModified,
+            caminho: atestadoPath,
+          };
+        }
         atestadoNomeArquivo = atestadoArquivo.name;
       }
     } catch (erro) {
@@ -825,6 +854,9 @@ function prepararEntradaAtrasada() {
 
     botaoEnviar.disabled = false;
     botaoEnviar.textContent = textoOriginalBotao;
+
+    // atraso gravado: não há mais motivo para reaproveitar o arquivo enviado
+    atestadoEnviado = null;
 
     form.reset();
     document.getElementById("atr-aluno-nome").value = sessao.nome;
