@@ -505,14 +505,7 @@ function deLinhaAtraso(linha) {
   if (linha.atualizada_em) {
     entrada.atualizadaEm = new Date(linha.atualizada_em).toISOString();
   }
-  // o atestado mora no Supabase Storage (bucket público "atestados") e a
-  // coluna guarda só o CAMINHO do arquivo: a URL pública é montada aqui
-  // para a tela poder abrir a foto/PDF sem saber nada sobre o Storage
-  if (linha.atestado_path) {
-    entrada.atestadoUrl = supabase.storage
-      .from("atestados")
-      .getPublicUrl(linha.atestado_path).data.publicUrl;
-  }
+  // o link do atestado é gerado no clique (Dados.gerarLinkAtestado)
   return entrada;
 }
 
@@ -1088,6 +1081,27 @@ const Dados = {
     }
 
     return caminho;
+  },
+
+  // gera um link temporário (URL assinada) para abrir o atestado
+  async gerarLinkAtestado(caminho) {
+    if (!caminho) throw new Error("Atestado sem arquivo.");
+
+    const { data, error } = await supabase.storage
+      .from("atestados")
+      .createSignedUrl(caminho, 120);
+
+    if (data?.signedUrl) {
+      console.info("[atestado] link temporário gerado");
+      return data.signedUrl;
+    }
+
+    // PROVISÓRIO: remover quando o bucket virar privado (Etapa 7)
+    console.warn(
+      "[atestado] não consegui gerar o link temporário, usando o link público (provisório):",
+      error
+    );
+    return supabase.storage.from("atestados").getPublicUrl(caminho).data.publicUrl;
   },
 
   // grava uma entrada atrasada nova na tabela "atrasos" do Supabase (o id da

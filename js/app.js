@@ -1253,7 +1253,7 @@ function prepararEntradaAtrasada() {
           ${ent.justificativaTipo === "RESPONSAVEL"
             ? `Veio com responsável: ${escapar(ent.responsavelNome || "não informado")}`
             : ent.justificativaTipo === "ATESTADO"
-              ? `Atestado: ${ent.atestadoUrl ? `<a href="#" onclick="verAtestado('${ent.id}'); return false;">ver foto</a>` : "anexado"}`
+              ? `Atestado: ${ent.atestadoPath ? `<a href="#" onclick="verAtestado('${ent.id}'); return false;">ver foto</a>` : "anexado"}`
               : "Sem responsável ou atestado (registro antigo)"}
         </p>
 
@@ -1309,14 +1309,28 @@ function prepararEntradaAtrasada() {
     renderizar();
   };
 
-  // abre o atestado numa aba nova. O arquivo agora mora no Supabase Storage
-  // (bucket público "atestados"), então basta abrir a URL pública que veio
-  // junto com a entrada (atestadoUrl) — não é mais preciso desenhar a
-  // imagem numa aba em branco a partir de um base64.
-  window.verAtestado = function (id) {
+  // abre o atestado numa aba nova: o link é gerado no clique
+  // (Dados.gerarLinkAtestado) e expira em 2 minutos. A aba é aberta ANTES
+  // de qualquer await para não ser bloqueada como popup.
+  window.verAtestado = async function (id) {
     const entrada = atrasosDoPainel.find((e) => e.id === id);
-    if (!entrada || !entrada.atestadoUrl) return;
-    window.open(entrada.atestadoUrl, "_blank");
+    if (!entrada || !entrada.atestadoPath) return;
+
+    const aba = window.open("", "_blank");
+    if (!aba) {
+      alert("Seu navegador bloqueou a nova aba. Permita pop-ups para este site e tente de novo.");
+      return;
+    }
+    aba.opener = null;
+
+    try {
+      const url = await Dados.gerarLinkAtestado(entrada.atestadoPath);
+      aba.location.href = url;
+    } catch (erro) {
+      aba.close();
+      console.error("Não foi possível abrir o atestado.", erro);
+      alert("Não foi possível abrir o atestado agora. Se continuar, saia e entre de novo no painel.");
+    }
   };
 
   document.querySelectorAll(".filtro-btn").forEach((botao) => {
