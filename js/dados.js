@@ -1224,6 +1224,50 @@ const Dados = {
 
     return () => supabase.removeChannel(canal);
   },
+
+  /* ---------------------------------------------------------------
+     CONSULTAS DE SEGURANÇA DO LOGIN
+     Duas checagens rápidas chamadas pela tela de login antes de seguir.
+     NENHUMA delas lança erro: em qualquer problema (Supabase fora do
+     ar, RPC inexistente, rede caída...) elas devolvem false, para que
+     a falha da checagem nunca impeça o login.
+     --------------------------------------------------------------- */
+
+  // true somente se a função senha_padrao_em_uso do banco devolver true
+  // (a senha padrão está em uso nesta sessão). Qualquer erro ->
+  // console.warn e false.
+  async senhaPadraoEmUso(token) {
+    try {
+      const { data, error } = await supabase.rpc("senha_padrao_em_uso", {
+        p_token: token ?? "",
+      });
+
+      if (error) throw error;
+
+      return data === true;
+    } catch (erro) {
+      console.warn("Não foi possível verificar a senha padrão em uso:", erro);
+      return false;
+    }
+  },
+
+  // true somente se a função login_bloqueado do banco devolver true
+  // (o login deste RA está bloqueado). Qualquer erro -> false, sem
+  // lançar nada (não pode impedir o login).
+  async loginBloqueado(tipo, ra) {
+    try {
+      const { data, error } = await supabase.rpc("login_bloqueado", {
+        p_tipo: tipo,
+        p_ra: String(ra ?? ""),
+      });
+
+      if (error) throw error;
+
+      return data === true;
+    } catch (erro) {
+      return false;
+    }
+  },
 };
 
 // lê o alunos.json assim que o sistema abre (é a única fonte de dados

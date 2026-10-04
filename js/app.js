@@ -19,6 +19,13 @@ import { ativarPush } from "./push.js";
    faziam ao checar `Sessao.obter()` e redirecionar.
    ===================================================================== */
 
+// Destino original guardado quando o login obriga a trocar a senha padrão
+// antes de seguir: "nova-ocorrencia" (professor) ou "entrada-atrasada"
+// (aluno). O login preenche TUDO (destino, RA e aviso) SÓ DEPOIS do
+// showView da tela de troca — o aoEntrar dessa tela esconde o aviso e
+// limpa a variável, então nada sobra de fluxos antigos.
+let destinoTrocaSenha = null;
+
 const VIEWS = {
   "index": {},
   "professor-login": { aoEntrar: () => limparTela("professor-login") },
@@ -26,13 +33,32 @@ const VIEWS = {
 
   // troca de senha do aluno: não tem "guard" porque não depende de
   // sessão — o próprio formulário pede o RA e a senha atual, que são
-  // conferidos no banco por Dados.trocarSenhaAluno
-  "aluno-trocar-senha": { aoEntrar: () => limparTela("aluno-trocar-senha") },
+  // conferidos no banco por Dados.trocarSenhaAluno.
+  // Ao entrar, esconde o aviso de senha padrão e limpa o destino
+  // guardado: assim o aviso/destino só valem quando a tela é aberta
+  // pelo fluxo do login, que preenche tudo DEPOIS do showView.
+  "aluno-trocar-senha": {
+    aoEntrar: () => {
+      limparTela("aluno-trocar-senha");
+      const aviso = document.getElementById("ats-aviso-obrigatorio");
+      if (aviso) aviso.style.display = "none";
+      destinoTrocaSenha = null;
+    },
+  },
 
   // troca de senha do professor: não tem "guard" porque não depende de
   // sessão — o próprio formulário pede o RA e a senha atual, que são
-  // conferidos no banco por Dados.trocarSenhaProfessor
-  "professor-trocar-senha": { aoEntrar: () => limparTela("professor-trocar-senha") },
+  // conferidos no banco por Dados.trocarSenhaProfessor.
+  // Idem acima: esconde o aviso de senha padrão e limpa o destino
+  // guardado a cada entrada na tela.
+  "professor-trocar-senha": {
+    aoEntrar: () => {
+      limparTela("professor-trocar-senha");
+      const aviso = document.getElementById("pts-aviso-obrigatorio");
+      if (aviso) aviso.style.display = "none";
+      destinoTrocaSenha = null;
+    },
+  },
 
   "secretaria-login": { aoEntrar: () => limparTela("secretaria-login") },
 
@@ -224,6 +250,17 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     }
 
     if (!professor) {
+      // login devolveu null: ANTES da mensagem de senha errada, pergunta
+      // ao banco se o login está bloqueado (muitas tentativas); com o
+      // bloqueio ativo, mostra o aviso de espera no lugar da mensagem
+      // padrão (loginBloqueado nunca lança erro, então não quebra aqui)
+      if (await Dados.loginBloqueado("PROFESSOR", ra)) {
+        mensagemErro.textContent =
+          "Muitas tentativas incorretas. Aguarde 15 minutos e tente de novo.";
+        mensagemErro.style.display = "block";
+        return;
+      }
+
       mensagemErro.textContent = Dados.professoresCarregados()
         ? "RA não encontrado ou senha incorreta."
         : "Não foi possível carregar a lista de professores (professores.json).";
@@ -235,6 +272,20 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     Sessao.salvar(professor);
     // só depois de logar como professor é que a tela de nova
     // ocorrência é liberada (ver "guard" em VIEWS acima)
+    // Se a senha padrão ainda está em uso, em vez de seguir para
+    // nova-ocorrencia obriga a troca de senha: abre a tela de troca e,
+    // SÓ DEPOIS do showView (o aoEntrar dela esconde o aviso e limpa o
+    // destino guardado), grava o destino original, preenche o RA e
+    // mostra o aviso obrigatório.
+    if (await Dados.senhaPadraoEmUso(professor.token)) {
+      showView("professor-trocar-senha");
+      destinoTrocaSenha = "nova-ocorrencia";
+      document.getElementById("pts-ra").value = ra;
+      document.getElementById("pts-aviso-obrigatorio").style.display = "block";
+      return;
+    }
+
+    // senha própria em uso (ou checagem inconclusiva): segue como sempre
     showView("nova-ocorrencia");
   });
 })();
@@ -275,6 +326,17 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     }
 
     if (!aluno) {
+      // login devolveu null: ANTES da mensagem de senha errada, pergunta
+      // ao banco se o login está bloqueado (muitas tentativas); com o
+      // bloqueio ativo, mostra o aviso de espera no lugar da mensagem
+      // padrão (loginBloqueado nunca lança erro, então não quebra aqui)
+      if (await Dados.loginBloqueado("ALUNO", ra)) {
+        mensagemErro.textContent =
+          "Muitas tentativas incorretas. Aguarde 15 minutos e tente de novo.";
+        mensagemErro.style.display = "block";
+        return;
+      }
+
       mensagemErro.textContent = Dados.alunosCarregados()
         ? "RA não encontrado ou senha incorreta."
         : "Não foi possível carregar a lista de alunos (GET /alunos).";
@@ -286,6 +348,20 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     Sessao.salvar(aluno);
     // só depois de logar como aluno é que a tela de entrada
     // atrasada é liberada (ver "guard" em VIEWS acima)
+    // Se a senha padrão ainda está em uso, em vez de seguir para
+    // entrada-atrasada obriga a troca de senha: abre a tela de troca e,
+    // SÓ DEPOIS do showView (o aoEntrar dela esconde o aviso e limpa o
+    // destino guardado), grava o destino original, preenche o RA e
+    // mostra o aviso obrigatório.
+    if (await Dados.senhaPadraoEmUso(aluno.token)) {
+      showView("aluno-trocar-senha");
+      destinoTrocaSenha = "entrada-atrasada";
+      document.getElementById("ats-ra").value = ra;
+      document.getElementById("ats-aviso-obrigatorio").style.display = "block";
+      return;
+    }
+
+    // senha própria em uso (ou checagem inconclusiva): segue como sempre
     showView("entrada-atrasada");
   });
 })();
@@ -334,15 +410,40 @@ function showView(id, { sub = null, historico = "push" } = {}) {
       return;
     }
 
+    // nova senha precisa ter pelo menos 8 caracteres
+    if (novaSenha.length < 8) {
+      mensagemErro.textContent = "A nova senha precisa ter pelo menos 8 caracteres.";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // a nova senha não pode ser igual à senha atual
+    if (novaSenha === senhaAtual) {
+      mensagemErro.textContent = "A nova senha precisa ser diferente da atual.";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
     // ---- 2) confere a senha atual e grava a nova no banco (Supabase) ----
     // (se a senha atual estiver errada ou o RA não existir, o erro é
     // "senha atual incorreta" — ver Dados.trocarSenhaAluno)
     try {
       await Dados.trocarSenhaAluno(ra, senhaAtual, novaSenha);
     } catch (erro) {
-      mensagemErro.textContent = /senha atual incorreta/i.test(erro.message)
-        ? "Senha atual incorreta. Confira o RA e a senha digitada."
-        : erro.message;
+      // "senha atual incorreta": ANTES de mostrar a mensagem, pergunta ao
+      // banco se o login está bloqueado (muitas tentativas); com o bloqueio
+      // ativo, mostra o aviso de espera no lugar da mensagem de senha errada
+      if (/senha atual incorreta/i.test(erro.message)) {
+        if (await Dados.loginBloqueado("ALUNO", ra)) {
+          mensagemErro.textContent =
+            "Muitas tentativas incorretas. Aguarde 15 minutos e tente de novo.";
+          mensagemErro.style.display = "block";
+          return;
+        }
+        mensagemErro.textContent = "Senha atual incorreta. Confira o RA e a senha digitada.";
+      } else {
+        mensagemErro.textContent = erro.message;
+      }
       mensagemErro.style.display = "block";
       return;
     }
@@ -351,6 +452,18 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     form.reset();
     mensagemSucesso.style.display = "block";
     setTimeout(() => (mensagemSucesso.style.display = "none"), 4000);
+
+    // veio do login com a senha padrão em uso (destino guardado lá):
+    // esconde o aviso obrigatório, espera ~1,5 segundo (para ver o aviso
+    // de sucesso) e então segue para o destino original, limpando a variável
+    if (destinoTrocaSenha) {
+      const destino = destinoTrocaSenha;
+      document.getElementById("ats-aviso-obrigatorio").style.display = "none";
+      setTimeout(() => {
+        showView(destino);
+        destinoTrocaSenha = null;
+      }, 1500);
+    }
   });
 })();
 
@@ -398,15 +511,40 @@ function showView(id, { sub = null, historico = "push" } = {}) {
       return;
     }
 
+    // nova senha precisa ter pelo menos 8 caracteres
+    if (novaSenha.length < 8) {
+      mensagemErro.textContent = "A nova senha precisa ter pelo menos 8 caracteres.";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
+    // a nova senha não pode ser igual à senha atual
+    if (novaSenha === senhaAtual) {
+      mensagemErro.textContent = "A nova senha precisa ser diferente da atual.";
+      mensagemErro.style.display = "block";
+      return;
+    }
+
     // ---- 2) confere a senha atual e grava a nova no banco (Supabase) ----
     // (se a senha atual estiver errada ou o RA não existir, o erro é
     // "senha atual incorreta" — ver Dados.trocarSenhaProfessor)
     try {
       await Dados.trocarSenhaProfessor(ra, senhaAtual, novaSenha);
     } catch (erro) {
-      mensagemErro.textContent = /senha atual incorreta/i.test(erro.message)
-        ? "Senha atual incorreta. Confira o RA e a senha digitada."
-        : erro.message;
+      // "senha atual incorreta": ANTES de mostrar a mensagem, pergunta ao
+      // banco se o login está bloqueado (muitas tentativas); com o bloqueio
+      // ativo, mostra o aviso de espera no lugar da mensagem de senha errada
+      if (/senha atual incorreta/i.test(erro.message)) {
+        if (await Dados.loginBloqueado("PROFESSOR", ra)) {
+          mensagemErro.textContent =
+            "Muitas tentativas incorretas. Aguarde 15 minutos e tente de novo.";
+          mensagemErro.style.display = "block";
+          return;
+        }
+        mensagemErro.textContent = "Senha atual incorreta. Confira o RA e a senha digitada.";
+      } else {
+        mensagemErro.textContent = erro.message;
+      }
       mensagemErro.style.display = "block";
       return;
     }
@@ -415,6 +553,18 @@ function showView(id, { sub = null, historico = "push" } = {}) {
     form.reset();
     mensagemSucesso.style.display = "block";
     setTimeout(() => (mensagemSucesso.style.display = "none"), 4000);
+
+    // veio do login com a senha padrão em uso (destino guardado lá):
+    // esconde o aviso obrigatório, espera ~1,5 segundo (para ver o aviso
+    // de sucesso) e então segue para o destino original, limpando a variável
+    if (destinoTrocaSenha) {
+      const destino = destinoTrocaSenha;
+      document.getElementById("pts-aviso-obrigatorio").style.display = "none";
+      setTimeout(() => {
+        showView(destino);
+        destinoTrocaSenha = null;
+      }, 1500);
+    }
   });
 })();
 
